@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/golang/glog"
 
 	"k8s.io/api/core/v1"
@@ -11,22 +15,35 @@ import (
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	client_v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
 
-type Controller struct {
-	indexer  cache.Indexer
-	queue    workqueue.RateLimitingInterface
-	informer cache.Controller
+// EC2Client represents the operations we perform on the EC2 API
+type EC2Client interface {
+	DescribeInstancesPages(*ec2.DescribeInstancesInput, func(*ec2.DescribeInstancesOutput, bool) bool) error
+	CreateNetworkInterface(*ec2.CreateNetworkInterfaceInput) (*ec2.CreateNetworkInterfaceOutput, error)
+	ModifyNetworkInterfaceAttribute(*ec2.ModifyNetworkInterfaceAttributeInput) (*ec2.ModifyNetworkInterfaceAttributeOutput, error)
+	AttachNetworkInterface(*ec2.AttachNetworkInterfaceInput) (*ec2.AttachNetworkInterfaceOutput, error)
 }
 
-func NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller) *Controller {
+type Controller struct {
+	indexer     cache.Indexer
+	queue       workqueue.RateLimitingInterface
+	informer    cache.Controller
+	nodesClient client_v1.NodeInterface
+	ec2Client   EC2Client
+}
+
+func NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller, nodesClient client_v1.NodeInterface, ec2Client EC2Client) *Controller {
 	return &Controller{
-		informer: informer,
-		indexer:  indexer,
-		queue:    queue,
+		informer:    informer,
+		indexer:     indexer,
+		queue:       queue,
+		nodesClient: nodesClient,
+		ec2Client:   ec2Client,
 	}
 }
 
@@ -46,25 +63,6 @@ func (c *Controller) processNextItem() bool {
 	// Handle the error if something went wrong during the execution of the business logic
 	c.handleErr(err, key)
 	return true
-}
-
-// handleNode is the business logic of the controller.
-func (c *Controller) handleNode(key string) error {
-	obj, exists, err := c.indexer.GetByKey(key)
-	if err != nil {
-		glog.Errorf("Fetching object with key %s from store failed with %v", key, err)
-		return err
-	}
-
-	if !exists {
-		// Below we will warm up our cache with a Pod, so that we will see a delete for one pod
-		fmt.Printf("Node %s does not exist anymore\n", key)
-	} else {
-		// Note that you also have to check the uid if you have a local controlled resource, which
-		// is dependent on the actual instance, to detect that a Pod was recreated with the same name
-		fmt.Printf("Sync/Add/Update for Node %#v\n", obj.(*v1.Node))
-	}
-	return nil
 }
 
 // handleErr checks if an error happened and makes sure we will retry later.
@@ -168,7 +166,22 @@ func main() {
 		},
 	}, cache.Indexers{})
 
-	controller := NewController(queue, indexer, informer)
+	nodesClient := clientset.Nodes()
+
+	sess := session.Must(session.NewSession())
+	md := ec2metadata.New(sess)
+	currRegion, err := md.Region()
+	if err != nil {
+		glog.Fatalf("Error determining region [%v]", err)
+	}
+	sess = session.Must(session.NewSession(
+		&aws.Config{
+			Region: aws.String(currRegion),
+		},
+	))
+	ec2 := ec2.New(sess)
+
+	controller := NewController(queue, indexer, informer, nodesClient, ec2)
 
 	// We can now warm up the cache for initial synchronization.
 	// Let's suppose that we knew about a pod "mypod" on our last run, therefore add it to the cache.
