@@ -31,6 +31,7 @@ type eniInterface struct {
 	EniID       string   `json:"eni_id"`
 	Attached    bool     `json:"attached"`
 	InterfaceIP string   `json:"interface_ip"`
+	CIDRBlock   string   `json:"cidr_block"`
 	Index       int      `json:"index"`
 	IPs         []string `json:"ips"`
 	MACAddress  string   `json:"mac_address"`
@@ -198,6 +199,17 @@ func (c *Controller) createENI(node *v1.Node) (*eniInterface, error) {
 
 	subnetID := *inst.SubnetId
 
+	subResp, err := c.ec2Client.DescribeSubnets(
+		&ec2.DescribeSubnetsInput{SubnetIds: aws.StringSlice([]string{subnetID})},
+	)
+	if err != nil {
+		glog.Errorf("Error fetching subnet info for %s [%v]", subnetID, err)
+		return nil, err
+	}
+	if len(subResp.Subnets) != 1 {
+		return nil, fmt.Errorf("Expected one subnet match for %q, got %v", subnetID, subResp.Subnets)
+	}
+
 	securityGroups := []string{}
 	for _, sg := range inst.SecurityGroups {
 		securityGroups = append(securityGroups, *sg.GroupId)
@@ -225,6 +237,7 @@ func (c *Controller) createENI(node *v1.Node) (*eniInterface, error) {
 		EniID:       *ceniResp.NetworkInterface.NetworkInterfaceId,
 		Attached:    false,
 		InterfaceIP: *ceniResp.NetworkInterface.PrivateIpAddress,
+		CIDRBlock:   *subResp.Subnets[0].CidrBlock,
 		IPs:         ips,
 		MACAddress:  *ceniResp.NetworkInterface.MacAddress,
 	}, nil
