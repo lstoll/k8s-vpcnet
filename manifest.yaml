@@ -17,8 +17,7 @@ spec:
       #  k8s-addon: cluster-autoscaler.addons.k8s.io
         app: eni-controller
       annotations:
-      #  iam.amazonaws.com/role: autoscaler
-      # use this to force deploy updates
+        # use this to force deploy updates
         template/timestamp: "{{TIMESTAMP}}"
     spec:
       serviceAccountName:  eni-controller
@@ -26,13 +25,28 @@ spec:
         - name:  eni-controller
           image: lstoll/eni-controller:{{VERSION_TAG}}
           imagePullPolicy: Always
+          args:
+            - --v=2
           resources:
+          # TODO -assess these limits
             limits:
               cpu: 100m
               memory: 300Mi
             requests:
               cpu: 100m
               memory: 300Mi
+      # Schedule on the master. Because this is critical for networking, we
+      # can't bring up any pods until this is running. To avoid all runtimes
+      # needing IAM privs to manage interfaces, we can run it in a cluster
+      # privileged context, ignoring network setup restrictions
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+        - key: "node-role.kubernetes.io/master"
+          effect: NoSchedule
+        - key: "k8s-vpcnet/no-interface-configured"
+          effect: NoSchedule
+      hostNetwork: true
 ---
 apiVersion: v1
 kind: ServiceAccount
