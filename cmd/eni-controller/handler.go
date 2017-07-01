@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,8 +17,6 @@ import (
 )
 
 const (
-	// ifsKey is the annotation we use to persist interface configuration
-	ifsKey = "eni-interfaces"
 	// noInterfaceTaint is the key used on the taint before the node has an interface
 	taintNoInterface = "k8s-vpcnet/no-interface-configured"
 	// ipAddrCount is the number of addresses to assign to an ENI
@@ -26,16 +25,6 @@ const (
 	// brIf is the name of the interface we're using, for now.
 	brIf = "vpcbr0"
 )
-
-type eniInterface struct {
-	EniID       string   `json:"eni_id"`
-	Attached    bool     `json:"attached"`
-	InterfaceIP string   `json:"interface_ip"`
-	CIDRBlock   string   `json:"cidr_block"`
-	Index       int      `json:"index"`
-	IPs         []string `json:"ips"`
-	MACAddress  string   `json:"mac_address"`
-}
 
 // handleNode is the business logic of the controller.
 func (c *Controller) handleNode(key string) error {
@@ -60,7 +49,7 @@ func (c *Controller) handleNode(key string) error {
 	glog.Infof("Sync/Add/Update for Node %s", node.Name)
 
 	// Check to see if we have a configuration
-	nc, err := nodeConfiguration(node.Annotations)
+	nc, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
 
 	// if we have to congfiguration, taint the node that we don't ASAP to avoid
 	// pods being scheuled on the node. We should ensure our configuration
@@ -90,13 +79,13 @@ func (c *Controller) handleNode(key string) error {
 		// Static for now, we can change this when we use more than one ENI
 		// Start at 1, host IF is 0
 		newIf.Index = 1
-		ifsJSON, err := json.Marshal(map[string]*eniInterface{brIf: newIf})
+		ifsJSON, err := json.Marshal(vpcnetstate.ENIMap{brIf: newIf})
 		if err != nil {
 			glog.Infof("Node %s - error marshaling interface %v [%v]", node.Name, newIf, err)
 			return err
 		}
 		c.updateNode(node.Name, func(n *v1.Node) {
-			n.Annotations[ifsKey] = string(ifsJSON)
+			n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
 		})
 		// and bail out, next watch can take over
 		return nil
@@ -117,7 +106,7 @@ func (c *Controller) handleNode(key string) error {
 			return err
 		}
 		c.updateNode(node.Name, func(n *v1.Node) {
-			n.Annotations[ifsKey] = string(ifsJSON)
+			n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
 		})
 		// and bail out, next watch can take over
 		return nil
@@ -191,7 +180,7 @@ func (c *Controller) getInstance(node *v1.Node) (*ec2.Instance, error) {
 
 // createENI will create a new ENI with the number of IPs noted. It will return
 // the interface definition
-func (c *Controller) createENI(node *v1.Node) (*eniInterface, error) {
+func (c *Controller) createENI(node *v1.Node) (*vpcnetstate.ENI, error) {
 	inst, err := c.getInstance(node)
 	if err != nil {
 		return nil, err
@@ -233,7 +222,7 @@ func (c *Controller) createENI(node *v1.Node) (*eniInterface, error) {
 		ips = append(ips, *ip.PrivateIpAddress)
 	}
 
-	return &eniInterface{
+	return &vpcnetstate.ENI{
 		EniID:       *ceniResp.NetworkInterface.NetworkInterfaceId,
 		Attached:    false,
 		InterfaceIP: *ceniResp.NetworkInterface.PrivateIpAddress,
@@ -244,7 +233,7 @@ func (c *Controller) createENI(node *v1.Node) (*eniInterface, error) {
 }
 
 // attachENI will attach the provided ENI interface to the given node
-func (c *Controller) attachENI(node *v1.Node, eni *eniInterface) error {
+func (c *Controller) attachENI(node *v1.Node, eni *vpcnetstate.ENI) error {
 	if eni.Attached {
 		return fmt.Errorf("Cannot attach %s to %s, it is flagged as being attached", eni.EniID, node.Name)
 	}
@@ -279,25 +268,7 @@ func (c *Controller) attachENI(node *v1.Node, eni *eniInterface) error {
 	return nil
 }
 
-// nodeConfiguration returns checks for configuration, returning it if found or
-// nil if it isn't
-func nodeConfiguration(annotations map[string]string) (map[string]*eniInterface, error) {
-	ifs, ok := annotations[ifsKey]
-	if !ok {
-		return nil, nil
-	}
-
-	nc := make(map[string]*eniInterface)
-
-	err := json.Unmarshal([]byte(ifs), &nc)
-	if err != nil {
-		return nil, errors.Wrap(err, "Error parsing node network configuration")
-	}
-
-	return nc, nil
-}
-
-// hasTaint returns true if node has matching tains
+// hasTaint returns true if node has matching taints
 func hasTaint(node *v1.Node, key string, effect v1.TaintEffect) bool {
 	for _, t := range node.Spec.Taints {
 		if t.Key == key && t.Effect == effect {
