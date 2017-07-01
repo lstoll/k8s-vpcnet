@@ -1,0 +1,80 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: eni-controller
+  namespace: space-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eni-controller
+  template:
+    metadata:
+      labels:
+      #  k8s-addon: cluster-autoscaler.addons.k8s.io
+        app: eni-controller
+      annotations:
+      #  iam.amazonaws.com/role: autoscaler
+      # use this to force deploy updates
+        template/timestamp: "{{TIMESTAMP}}"
+    spec:
+      serviceAccountName:  eni-controller
+      containers:
+        - name:  eni-controller
+          image: lstoll/eni-controller:{{VERSION_TAG}}
+          imagePullPolicy: Always
+          resources:
+            limits:
+              cpu: 100m
+              memory: 300Mi
+            requests:
+              cpu: 100m
+              memory: 300Mi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+  name: eni-controller
+  namespace: space-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: eni-controller
+  namespace: space-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - watch
+  - list
+  - get
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name:  eni-controller
+  namespace: space-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name:  eni-controller
+subjects:
+  - kind: ServiceAccount
+    name:  eni-controller
+    namespace: space-system
