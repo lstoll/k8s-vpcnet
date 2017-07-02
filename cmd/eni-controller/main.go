@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"time"
 
@@ -27,6 +28,7 @@ type EC2Client interface {
 	CreateNetworkInterface(*ec2.CreateNetworkInterfaceInput) (*ec2.CreateNetworkInterfaceOutput, error)
 	ModifyNetworkInterfaceAttribute(*ec2.ModifyNetworkInterfaceAttributeInput) (*ec2.ModifyNetworkInterfaceAttributeOutput, error)
 	AttachNetworkInterface(*ec2.AttachNetworkInterfaceInput) (*ec2.AttachNetworkInterfaceOutput, error)
+	DescribeSubnets(*ec2.DescribeSubnetsInput) (*ec2.DescribeSubnetsOutput, error)
 }
 
 type Controller struct {
@@ -120,9 +122,9 @@ func (c *Controller) runWorker() {
 }
 
 func main() {
-	// I allocate IPS.
+	flag.Set("logtostderr", "true")
 
-	// Watch for nodes
+	flag.Parse()
 
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -138,6 +140,7 @@ func main() {
 	watchlist := cache.NewListWatchFromClient(
 		clientset.Core().RESTClient(),
 		"nodes", v1.NamespaceAll,
+		// TODO narrow this down
 		fields.Everything(),
 	)
 
