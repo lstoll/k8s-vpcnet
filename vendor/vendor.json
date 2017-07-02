@@ -181,16 +181,16 @@
 			"revisionTime": "2017-03-29T03:22:34Z"
 		},
 		{
-			"checksumSHA1": "Kh/msV2XTuYy0UB63hhoKcKfkyY=",
+			"checksumSHA1": "igZ0Chd3Xv5nOYYWZP5TFHQUZSY=",
 			"path": "github.com/containernetworking/cni/pkg/invoke",
-			"revision": "6a6f9d7f5c148ba7134c9cf31687329bdf1c7eeb",
-			"revisionTime": "2017-06-29T09:06:28Z"
+			"revision": "137b4975ecab6e1f0c24c1e3c228a50a3cfba75e",
+			"revisionTime": "2017-04-07T17:20:07Z"
 		},
 		{
 			"checksumSHA1": "LvjTFR2Am01kquJNDnfISncPfRw=",
 			"path": "github.com/containernetworking/cni/pkg/skel",
-			"revision": "6a6f9d7f5c148ba7134c9cf31687329bdf1c7eeb",
-			"revisionTime": "2017-06-29T09:06:28Z"
+			"revision": "137b4975ecab6e1f0c24c1e3c228a50a3cfba75e",
+			"revisionTime": "2017-04-07T17:20:07Z"
 		},
 		{
 			"checksumSHA1": "UdacIv0GL17D8U1ABloA6ax5ICc=",
@@ -199,16 +199,16 @@
 			"revisionTime": "2017-06-29T09:06:28Z"
 		},
 		{
-			"checksumSHA1": "lmLYXYR/twmBu+6U678QNF+BQlQ=",
+			"checksumSHA1": "b5rwQbrVcEmHUeCzEAiFA2UBQEI=",
 			"path": "github.com/containernetworking/cni/pkg/types/020",
-			"revision": "6a6f9d7f5c148ba7134c9cf31687329bdf1c7eeb",
-			"revisionTime": "2017-06-29T09:06:28Z"
+			"revision": "137b4975ecab6e1f0c24c1e3c228a50a3cfba75e",
+			"revisionTime": "2017-04-07T17:20:07Z"
 		},
 		{
-			"checksumSHA1": "r6qX7lyz4pweijiXjWMcxvm4wQQ=",
+			"checksumSHA1": "ZSWp/TzleDx2bIcuXWdPn5SBQRY=",
 			"path": "github.com/containernetworking/cni/pkg/types/current",
-			"revision": "6a6f9d7f5c148ba7134c9cf31687329bdf1c7eeb",
-			"revisionTime": "2017-06-29T09:06:28Z"
+			"revision": "137b4975ecab6e1f0c24c1e3c228a50a3cfba75e",
+			"revisionTime": "2017-04-07T17:20:07Z"
 		},
 		{
 			"checksumSHA1": "Y9KLxL9fFDnFHaDGOUfDkcbyV0U=",
@@ -217,19 +217,62 @@
 			"revisionTime": "2017-06-29T09:06:28Z"
 		},
 		{
-			"checksumSHA1": "vLEvXx9Cb/IDiwp4rqtAFMsVprI=",
-			"origin": "github.com/lstoll/plugins",
-			"path": "github.com/containernetworking/plugins",
+			"checksumSHA1": "Omgb6U9PjJc9SaNc0I1b0VZLAVc=",
+			"path": "github.com/containernetworking/plugins/pkg/ip",
 			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z",
-			"tree": true,
-			"version": "lstoll-no-gw-is-link-scope",
-			"versionExact": "lstoll-no-gw-is-link-scope"
+			"revisionTime": "2017-06-17T01:25:41Z"
 		},
 		{
-			"checksumSHA1": "vBjpCBmJyR25S7nMo/nO3uLTpDo=",
-			"origin": "github.com/containernetworking/plugins/vendor/github.com/coreos/go-iptables/iptables",
-			"path": "github.com/coreos/go-iptables/iptables",
+			"checksumSHA1": "UtLHdgTwnAuh2UoI2nZj9Oz+IGE=",
+			"path": "github.com/containernetworking/plugins/pkg/ipam",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "wmZ5nRpAN/myLfAzVpPR1RxnoFQ=",
+			"path": "github.com/containernetworking/plugins/pkg/ns",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "Jp1NUGzBq9t8splKYuwXyT7JYWk=",
+			"path": "github.com/containernetworking/plugins/pkg/testutils",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "909B5R5pbQLe7y6cgMlr8d0aLO0=",
+			"path": "github.com/containernetworking/plugins/pkg/utils",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "rUAk+nce6eDIWtYo/QYIoqlTfrY=",
+			"path": "github.com/containernetworking/plugins/pkg/utils/hwaddr",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "FrpnoHYv9g9aLu/ObDdNyYImTCo=",
+			"path": "github.com/containernetworking/plugins/plugins/ipam/host-local/backend",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "loPdXSI1MAI8Eq/4Tn0UmzOCBSc=",
+			"path": "github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "jyrvlGVdjLuSpgTTEXn3zU5amHo=",
+			"path": "github.com/containernetworking/plugins/plugins/main/bridge",
+			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
+			"revisionTime": "2017-06-17T01:25:41Z"
+		},
+		{
+			"checksumSHA1": "w5mUshYp2ClwfjttX1pvI88zHs0=",
+			"path": "github.com/containernetworking/plugins/plugins/main/loopback",
 			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
 			"revisionTime": "2017-06-17T01:25:41Z"
 		},
@@ -674,23 +717,16 @@
 			"revisionTime": "2017-06-20T10:48:52Z"
 		},
 		{
-			"checksumSHA1": "BGpCBchrdshwh7sLBTvYRtXbd8o=",
+			"checksumSHA1": "ZuDsOhY1ZhBBmZ8vn7FuXXQuCc4=",
 			"path": "github.com/vishvananda/netlink",
-			"revision": "1e2e08e8a2dcdacaae3f14ac44c5cfa31361f270",
-			"revisionTime": "2015-08-20T01:49:04Z"
+			"revision": "fe3b5664d23a11b52ba59bece4ff29c52772a56b",
+			"revisionTime": "2017-02-19T03:22:09Z"
 		},
 		{
-			"checksumSHA1": "r/vcO8YkOWNHKX5HKCukaU4Xzlg=",
+			"checksumSHA1": "J0FWg5W1n0qNtyXdbTENfzSaTEU=",
 			"path": "github.com/vishvananda/netlink/nl",
-			"revision": "1e2e08e8a2dcdacaae3f14ac44c5cfa31361f270",
-			"revisionTime": "2015-08-20T01:49:04Z"
-		},
-		{
-			"checksumSHA1": "zjfUA3qOv6grhBLpyJ+7EejXWQE=",
-			"origin": "github.com/containernetworking/plugins/vendor/github.com/vishvananda/netns",
-			"path": "github.com/vishvananda/netns",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "fe3b5664d23a11b52ba59bece4ff29c52772a56b",
+			"revisionTime": "2017-02-19T03:22:09Z"
 		},
 		{
 			"checksumSHA1": "9jjO5GjLa0XF/nfWihF02RoH4qc=",
@@ -751,13 +787,6 @@
 		{
 			"path": "golang.org/x/oauth2/jwt",
 			"revision": "cce311a261e6fcf29de72ca96827bdb0b7d9c9e6"
-		},
-		{
-			"checksumSHA1": "1k3oQiVul43goaqwjdVcyAgSWYo=",
-			"origin": "github.com/containernetworking/plugins/vendor/golang.org/x/sys/unix",
-			"path": "golang.org/x/sys/unix",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
 		},
 		{
 			"checksumSHA1": "DWHpSSH7hmB31XvpQqFDshcRU+4=",

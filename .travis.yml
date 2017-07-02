@@ -10,6 +10,6 @@ before_script:
 jobs:
   include:
     - stage: test
-      script: make build #test
+      script: make build test
     - stage: deploy
       script: make release

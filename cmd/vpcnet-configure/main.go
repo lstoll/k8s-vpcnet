@@ -26,6 +26,10 @@ import (
 	"k8s.io/client-go/util/workqueue"
 )
 
+var (
+	netconfPath string
+)
+
 // noInterfaceTaint is the key used on the taint before the node has an interface
 const taintNoInterface = "k8s-vpcnet/no-interface-configured"
 
@@ -36,10 +40,14 @@ func main() {
 
 	flag.StringVar(&mode, "mode", "kubernetes-auto", "Mode to run in. Default is normal on-cluster, or manual can be specified to configure directly")
 
+	// Manual
 	flag.StringVar(&mac, "host-mac", "", "[manual] MAC address of the ENI")
 	flag.StringVar(&bridge, "bridge-name", "", "[manual] name for the bridge")
 	flag.StringVar(&ip, "ip", "", "[manual] IP address for the bridge")
 	flag.StringVar(&cb, "cidr-block", "", "[manual] VPC Subnet CIDR block (e.g 10.0.0.0/8")
+
+	// Kubernetes
+	flag.StringVar(&netconfPath, "netconf-path", vpcnetstate.DefaultENIMapPath, "[kubernetes] Path to write the netconf for CNI IPAM")
 
 	flag.Parse()
 
@@ -205,7 +213,7 @@ func (c *controller) handleNode(key string) error {
 
 	// batch write the addresses
 	glog.V(2).Infof("Node %s writing interface map for %d interfaces", node.Name, len(configedMap))
-	err = vpcnetstate.WriteENIMap(configedMap)
+	err = vpcnetstate.WriteENIMap(netconfPath, configedMap)
 	if err != nil {
 		glog.Errorf("Error writing ENI map for %s", node.Name)
 		return err

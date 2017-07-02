@@ -15,6 +15,7 @@ build:
 	$(GOBUILD) -o build/bin/vpcnet-configure ./cmd/vpcnet-configure
 	$(GOBUILD) -o build/bin/bridge ./vendor/github.com/containernetworking/plugins/plugins/main/bridge
 	$(GOBUILD) -o build/bin/loopback ./vendor/github.com/containernetworking/plugins/plugins/main/loopback
+	$(GOBUILD) -o build/bin/vpcnet ./cmd/cni-ipam-vpcnet
 
 test:
 	go test -v $$(go list ./... | grep -v /vendor/)
@@ -24,7 +25,7 @@ containers: build
 	docker build --build-arg BINARY=vpcnet-configure -t vpcnet-configure:$(VERSION) .
 
 cni-bundle: build
-	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz bridge loopback
+	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz vpcnet bridge loopback
 
 release: build containers cni-bundle
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
