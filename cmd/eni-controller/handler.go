@@ -225,7 +225,9 @@ func (c *Controller) createENI(node *v1.Node) (*vpcnetstate.ENI, error) {
 
 	ips := []string{}
 	for _, ip := range ceniResp.NetworkInterface.PrivateIpAddresses {
-		ips = append(ips, *ip.PrivateIpAddress)
+		if *ip.PrivateIpAddress != *ceniResp.NetworkInterface.PrivateIpAddress {
+			ips = append(ips, *ip.PrivateIpAddress)
+		}
 	}
 
 	return &vpcnetstate.ENI{
