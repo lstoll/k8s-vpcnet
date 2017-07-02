@@ -26,6 +26,7 @@ spec:
           image: lstoll/eni-controller:{{VERSION_TAG}}
           imagePullPolicy: Always
           args:
+            - eni-controller
             - --v=2
           resources:
           # TODO -assess these limits
@@ -92,3 +93,73 @@ subjects:
   - kind: ServiceAccount
     name:  eni-controller
     namespace: space-system
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: vpcnet-configure
+  namespace: space-system
+  labels:
+    app: vpcnet-configure
+spec:
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: vpcnet-configure
+      annotations:
+        # use this to force deploy updates
+        template/timestamp: "{{TIMESTAMP}}"
+    spec:
+      hostNetwork: true
+      serviceAccountName: vpcnet-configure
+      containers:
+        - name: vpcnet-configure
+          image: lstoll/vpcnet-configure:{{VERSION_TAG}}
+          imagePullPolicy: Always
+          args:
+            - vpcnet-configure
+            - --v=2
+          securityContext:
+            # This is so we can manage interfaces
+            privileged: true
+          volumeMounts:
+            - mountPath: /var/lib/cni
+              name: cnidir
+      volumes:
+        - name: cnidir
+          hostPath:
+            path: /var/lib/cni
+      tolerations:
+        - key: "k8s-vpcnet/no-interface-configured"
+          effect: NoSchedule
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: vpcnet-configure
+  name: vpcnet-configure
+  namespace: space-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: vpcnet-configure
+  namespace: space-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: vpcnet-configure
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - watch
+  - list
+  - get
+  - update
+---

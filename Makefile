@@ -10,13 +10,19 @@ all: build
 build:
 	mkdir -p build/bin
 	$(GOBUILD) -o build/bin/eni-controller ./cmd/eni-controller
+	$(GOBUILD) -o build/bin/vpcnet-configure ./cmd/vpcnet-configure
 
 containers: build
 	docker build --build-arg BINARY=eni-controller -t eni-controller:$(VERSION) .
+	docker build --build-arg BINARY=vpcnet-configure -t vpcnet-configure:$(VERSION) .
 
 release: containers
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
 	docker push lstoll/eni-controller:$(VERSION)
+	docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:$(VERSION)
+	docker push lstoll/vpcnet-configure:$(VERSION)
 # For now YOLO as latest, later become branch specific
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:latest
 	docker push lstoll/eni-controller:latest
+	docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:latest
+	docker push lstoll/vpcnet-configure:latest
