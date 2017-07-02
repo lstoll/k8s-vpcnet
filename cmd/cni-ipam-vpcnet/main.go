@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
+	"github.com/golang/glog"
 	"github.com/pkg/errors"
 
 	"github.com/containernetworking/cni/pkg/skel"
@@ -14,18 +15,23 @@ import (
 
 // Net is the top level data passed in
 type Net struct {
-	Name       string      `json:"name"`
-	CNIVersion string      `json:"cniVersion"`
-	IPAM       *IPAMConfig `json:"ipam"`
+	Name       string `json:"name"`
+	CNIVersion string `json:"cniVersion"`
+	// Type is the type of interface plugin in use
+	Type string `json:"type"`
+	// Bridge is inherited from the bridge plugin, it is the name of the bridge
+	// interface. This should be used to determine the correct IP range
+	Bridge string      `json:"bridge"`
+	IPAM   *IPAMConfig `json:"ipam"`
 }
 
 // IPAMConfig is the config for this driver
 type IPAMConfig struct {
 	Name string `json:"name"`
-	// Interface is the "bridge" interface we should look up in the map to get
-	// IPs from
-	Interface string `json:"interface"`
-	// TODO - handle the more than one bridge case
+	// ENIMapPath is the optional path to read the map from. Otherwise, use default
+	ENIMapPath string `json:"eni_map_path"`
+	//DataDir overrides the dir that the plugin will track state in
+	DataDir string `json:"data_dir"`
 }
 
 func main() {
@@ -38,12 +44,20 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	em, err := vpcnetstate.ReadENIMap()
+	if conf.Type != "bridge" || conf.Bridge == "" {
+		glog.Fatal("Currently only compatible with bridge and/or no bridge interface specified")
+	}
+
+	mp := conf.IPAM.ENIMapPath
+	if mp == "" {
+		mp = vpcnetstate.DefaultENIMapPath
+	}
+	em, err := vpcnetstate.ReadENIMap(mp)
 	if err != nil {
 		return err
 	}
 
-	store, err := disk.New(conf.IPAM.Name, "")
+	store, err := disk.New(conf.IPAM.Name, conf.IPAM.DataDir)
 	if err != nil {
 		return err
 	}
@@ -69,7 +83,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	store, err := disk.New(conf.IPAM.Name, "")
+	store, err := disk.New(conf.IPAM.Name, conf.IPAM.DataDir)
 	if err != nil {
 		return err
 	}

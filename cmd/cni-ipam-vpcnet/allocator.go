@@ -30,7 +30,7 @@ func (a *IPAllocator) Get(id string) (types.Result, error) {
 	a.store.Lock()
 	defer a.store.Unlock()
 
-	brIf := a.conf.IPAM.Interface
+	brIf := a.conf.Bridge
 
 	config, ok := a.eniMap[brIf]
 	if !ok {

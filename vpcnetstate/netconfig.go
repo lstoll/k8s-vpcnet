@@ -2,9 +2,16 @@ package vpcnetstate
 
 import (
 	"encoding/json"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 
 	"github.com/pkg/errors"
 )
+
+// DefaultENIMapPath is the default path on the machine we store the address
+// mapping
+const DefaultENIMapPath = "/var/lib/cni/vpcnet/eni_map.json"
 
 // IFSKey is the key for the node annotation we use to persist interface
 // configuration
@@ -40,4 +47,32 @@ func ENIConfigFromAnnotations(annotations map[string]string) (ENIMap, error) {
 	}
 
 	return nc, nil
+}
+
+// WriteENIMap persists the map to disk
+func WriteENIMap(path string, em ENIMap) error {
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	b, err := json.Marshal(em)
+	if err != nil {
+		return err
+	}
+	err = ioutil.WriteFile(path, b, 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// ReadENIMap loads the map from disk
+func ReadENIMap(path string) (ENIMap, error) {
+	b, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	am := ENIMap{}
+	err = json.Unmarshal(b, &am)
+	if err != nil {
+		return nil, err
+	}
+	return am, nil
 }
