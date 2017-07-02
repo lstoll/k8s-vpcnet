@@ -217,23 +217,6 @@
 			"revisionTime": "2017-06-29T09:06:28Z"
 		},
 		{
-			"checksumSHA1": "vLEvXx9Cb/IDiwp4rqtAFMsVprI=",
-			"origin": "github.com/lstoll/plugins",
-			"path": "github.com/containernetworking/plugins",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z",
-			"tree": true,
-			"version": "lstoll-no-gw-is-link-scope",
-			"versionExact": "lstoll-no-gw-is-link-scope"
-		},
-		{
-			"checksumSHA1": "vBjpCBmJyR25S7nMo/nO3uLTpDo=",
-			"origin": "github.com/containernetworking/plugins/vendor/github.com/coreos/go-iptables/iptables",
-			"path": "github.com/coreos/go-iptables/iptables",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
-		},
-		{
 			"checksumSHA1": "RBwpnMpfQt7Jo7YWrRph0Vwe+f0=",
 			"path": "github.com/coreos/go-systemd/activation",
 			"revision": "24036eb3df68550d24a2736c5d013f4e83366866",
@@ -686,13 +669,6 @@
 			"revisionTime": "2015-08-20T01:49:04Z"
 		},
 		{
-			"checksumSHA1": "zjfUA3qOv6grhBLpyJ+7EejXWQE=",
-			"origin": "github.com/containernetworking/plugins/vendor/github.com/vishvananda/netns",
-			"path": "github.com/vishvananda/netns",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
-		},
-		{
 			"checksumSHA1": "9jjO5GjLa0XF/nfWihF02RoH4qc=",
 			"path": "golang.org/x/net/context",
 			"revision": "e90d6d0afc4c315a0d87a568ae68577cc15149a0",
@@ -751,13 +727,6 @@
 		{
 			"path": "golang.org/x/oauth2/jwt",
 			"revision": "cce311a261e6fcf29de72ca96827bdb0b7d9c9e6"
-		},
-		{
-			"checksumSHA1": "1k3oQiVul43goaqwjdVcyAgSWYo=",
-			"origin": "github.com/containernetworking/plugins/vendor/golang.org/x/sys/unix",
-			"path": "golang.org/x/sys/unix",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
 		},
 		{
 			"checksumSHA1": "DWHpSSH7hmB31XvpQqFDshcRU+4=",
