@@ -124,9 +124,7 @@ func (c *Controller) runWorker() {
 func main() {
 	flag.Set("logtostderr", "true")
 
-	// I allocate IPS.
-
-	// Watch for nodes
+	flag.Parse()
 
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -142,6 +140,7 @@ func main() {
 	watchlist := cache.NewListWatchFromClient(
 		clientset.Core().RESTClient(),
 		"nodes", v1.NamespaceAll,
+		// TODO narrow this down
 		fields.Everything(),
 	)
 

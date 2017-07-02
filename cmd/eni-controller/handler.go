@@ -34,19 +34,25 @@ func (c *Controller) handleNode(key string) error {
 		return err
 	}
 
+	if !exists {
+		// Below we will warm up our cache with a Pod, so that we will see a delete for one pod
+		glog.V(2).Infof("Node %s does not exist anymore", key)
+		// TODO - cleanup here. make sure eni's/ips/etc gone
+		return c.cleanupNode(key)
+	}
+
 	node, ok := obj.(*v1.Node)
 	if !ok {
 		glog.Errorf("Object with key %s [%v] is not a node!", key, obj)
 		return nil
 	}
+	glog.V(2).Infof("Sync/Add/Update for Node %s", node.Name)
 
-	if !exists {
-		// Below we will warm up our cache with a Pod, so that we will see a delete for one pod
-		glog.V(2).Infof("Node %s does not exist anymore", key)
-		// TODO - cleanup here. make sure eni's/ips/etc gone
-		return c.cleanupNode(node)
+	// Make sure we have EC2 instance id
+	if node.Spec.ExternalID == "" {
+		glog.V(2).Infof("Node %s has no ExternalID set, skipping", key)
+		return nil
 	}
-	glog.Infof("Sync/Add/Update for Node %s", node.Name)
 
 	// Check to see if we have a configuration
 	nc, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
@@ -117,7 +123,7 @@ func (c *Controller) handleNode(key string) error {
 
 // cleanupNode is called when the node no longer exists. Ensure the ENI and IPs
 // are free
-func (c *Controller) cleanupNode(node *v1.Node) error {
+func (c *Controller) cleanupNode(key string) error {
 	// TODO  implement
 	return nil
 }
