@@ -25,7 +25,7 @@ containers: build
 	docker build --build-arg BINARY=vpcnet-configure -t vpcnet-configure:$(VERSION) .
 
 cni-bundle: build
-	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz ipam-vpcnet bridge loopback
+	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz vpcnet bridge loopback
 
 release: build containers cni-bundle
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)

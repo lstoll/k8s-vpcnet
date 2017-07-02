@@ -57,16 +57,13 @@ func (args *Args) AsEnv() []string {
 		pluginArgsStr = stringify(args.PluginArgs)
 	}
 
-	// Ensure that the custom values are first, so any value present in
-	// the process environment won't override them.
-	env = append([]string{
-		"CNI_COMMAND=" + args.Command,
-		"CNI_CONTAINERID=" + args.ContainerID,
-		"CNI_NETNS=" + args.NetNS,
-		"CNI_ARGS=" + pluginArgsStr,
-		"CNI_IFNAME=" + args.IfName,
-		"CNI_PATH=" + args.Path,
-	}, env...)
+	env = append(env,
+		"CNI_COMMAND="+args.Command,
+		"CNI_CONTAINERID="+args.ContainerID,
+		"CNI_NETNS="+args.NetNS,
+		"CNI_ARGS="+pluginArgsStr,
+		"CNI_IFNAME="+args.IfName,
+		"CNI_PATH="+args.Path)
 	return env
 }
 
