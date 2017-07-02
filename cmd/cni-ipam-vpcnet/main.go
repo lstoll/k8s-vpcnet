@@ -1,31 +1,13 @@
-// Copyright 2015 CNI authors
-// Modifications copyright 2017 Lincoln Stoll
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
 
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
 	"github.com/pkg/errors"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
 )
@@ -73,11 +55,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 		eniMap: em,
 	}
 
-	lt := &current.Result{}
+	result, err := alloc.Get(args.ContainerID)
+	if err != nil {
+		return err
+	}
 
-	result.Routes = ipamConf.Routes
-
-	return types.PrintResult(result, confVersion)
+	return types.PrintResult(result, version.Current())
 }
 
 func cmdDel(args *skel.CmdArgs) error {
@@ -92,10 +75,12 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 	defer store.Close()
 
-	if errors != nil {
-		return fmt.Errorf(strings.Join(errors, ";"))
+	alloc := &IPAllocator{
+		conf:  conf,
+		store: store,
 	}
-	return nil
+
+	return alloc.Release(args.ContainerID)
 }
 
 func loadConfig(dat []byte) (*Net, error) {
