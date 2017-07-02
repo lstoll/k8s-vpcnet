@@ -79,3 +79,16 @@ func configureInterface(bridgeName, mac string, ip *net.IPNet) error {
 
 	return nil
 }
+
+func interfaceExists(name string) (bool, error) {
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return false, errors.Wrapf(err, "Error checking for %q existence", name)
+	}
+	for _, i := range ifs {
+		if i.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
