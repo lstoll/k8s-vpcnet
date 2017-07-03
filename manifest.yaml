@@ -2,7 +2,7 @@ apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   name: eni-controller
-  namespace: space-system
+  namespace: kube-system
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: eni-controller
@@ -57,13 +57,13 @@ metadata:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: eni-controller
   name: eni-controller
-  namespace: space-system
+  namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:
   name: eni-controller
-  namespace: space-system
+  namespace: kube-system
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: eni-controller
@@ -82,7 +82,7 @@ apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
   name:  eni-controller
-  namespace: space-system
+  namespace: kube-system
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: eni-controller
@@ -93,13 +93,13 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name:  eni-controller
-    namespace: space-system
+    namespace: kube-system
 ---
 apiVersion: extensions/v1beta1
 kind: DaemonSet
 metadata:
   name: vpcnet-configure
-  namespace: space-system
+  namespace: kube-system
   labels:
     app: vpcnet-configure
 spec:
@@ -143,13 +143,13 @@ metadata:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: vpcnet-configure
   name: vpcnet-configure
-  namespace: space-system
+  namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:
   name: vpcnet-configure
-  namespace: space-system
+  namespace: kube-system
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: vpcnet-configure
