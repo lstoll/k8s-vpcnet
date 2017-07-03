@@ -24,7 +24,7 @@ var testMap = vpcnetstate.ENIMap{
 		InterfaceIP: "10.0.8.96",
 		CIDRBlock:   "10.0.0.0/20",
 		Index:       1,
-		IPs:         []string{"10.0.8.96", "10.0.10.32", "10.0.15.243", "10.0.15.36"},
+		IPs:         []string{"10.0.10.32", "10.0.15.243", "10.0.15.36"},
 		MACAddress:  "0a:3e:1f:4e:c6:d2",
 	},
 }
@@ -98,6 +98,10 @@ func TestIPAM(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Allocated IP %q that we're not configured to issue from %v", result.IPs[0].Address.IP.String(), testMap[testBr].IPs)
+	}
+
+	if result.IPs[0].Address.IP.Equal(result.Routes[1].GW) {
+		t.Error("Allocated bridge IP!")
 	}
 
 	// Free the IP
