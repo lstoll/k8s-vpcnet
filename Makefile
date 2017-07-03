@@ -36,7 +36,7 @@ release: build containers cni-bundle
 	cat manifest.yaml | sed -e "s/{{VERSION_TAG}}/$(VERSION)/g" | sed -e "s/{{TIMESTAMP}}/$(TIMESTAMP)/g" > $(TEMPDIR)/manifest-$(VERSION).yaml
 	aws s3 cp --acl public-read $(TEMPDIR)/manifest-$(VERSION).yaml s3://s3.lstoll.net/artifacts/k8s-vpcnet/manifest/
 # For now YOLO as latest, later become branch specific
-	if [ "$$TRAVIS_BRANCH" == "master" ]; then \
+	if [ "$$TRAVIS_BRANCH" = "master" ]; then \
 		docker tag eni-controller:$(VERSION) lstoll/eni-controller:latest && \
 		docker push lstoll/eni-controller:latest && \
 		docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:latest && \
