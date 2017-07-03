@@ -1,6 +1,10 @@
 .PHONY: all build containers release test cni-bundle
 
+ifdef TRAVIS_COMMIT
+VERSION := $(shell git rev-parse --short HEAD)
+else
 VERSION := $(shell git rev-parse --short HEAD)$(shell if ! git diff-index --quiet HEAD --; then echo "-dirty"; fi)
+endif
 BUILD_TIME := $(shell date +%Y-%m-%d-%H:%M)
 
 GOBUILD := GOOS=linux GOARCH=amd64 go build -i -ldflags "-s -X github.com/lstoll/k8s-vpcnet/version.Version=$(VERSION) -X github.com/lstoll/k8s-vpcnet/version.BuildTime=$(BUILD_TIME)"
@@ -28,6 +32,7 @@ cni-bundle: build
 	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz vpcnet bridge loopback
 
 release: build containers cni-bundle
+	git status
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
 	docker push lstoll/eni-controller:$(VERSION)
 	docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:$(VERSION)
