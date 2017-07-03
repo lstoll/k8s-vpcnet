@@ -7,7 +7,7 @@ VERSION := $(shell git rev-parse --short HEAD)$(shell if ! git diff-index --quie
 endif
 BUILD_TIME := $(shell date +%Y-%m-%d-%H:%M)
 
-GOBUILD := GOOS=linux GOARCH=amd64 go build -i -ldflags "-s -X github.com/lstoll/k8s-vpcnet/version.Version=$(VERSION) -X github.com/lstoll/k8s-vpcnet/version.BuildTime=$(BUILD_TIME)"
+GOBUILD := CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -i -ldflags "-s -X github.com/lstoll/k8s-vpcnet/version.Version=$(VERSION) -X github.com/lstoll/k8s-vpcnet/version.BuildTime=$(BUILD_TIME)"
 
 TEMPDIR := $(shell mktemp -d)
 
