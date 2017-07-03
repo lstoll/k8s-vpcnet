@@ -21,6 +21,7 @@ spec:
         template/timestamp: "{{TIMESTAMP}}"
     spec:
       serviceAccountName:  eni-controller
+      hostNetwork: true
       containers:
         - name:  eni-controller
           image: lstoll/eni-controller:{{VERSION_TAG}}
