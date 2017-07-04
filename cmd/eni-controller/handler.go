@@ -143,7 +143,7 @@ func (c *Controller) updateNode(name string, mutator func(node *v1.Node)) error 
 		if api_errors.IsConflict(err) {
 			// Node was modified, fetch and try again
 			glog.V(2).Infof("Conflict updating node %s, retrying", name)
-			node, err := c.nodesClient.Get(name, meta_v1.GetOptions{})
+			node, err = c.nodesClient.Get(name, meta_v1.GetOptions{})
 			if err != nil {
 				return errors.Wrapf(err, "Error fetching node %s to update", node)
 			}

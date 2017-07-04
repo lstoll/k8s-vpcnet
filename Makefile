@@ -32,7 +32,6 @@ cni-bundle: build
 	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz vpcnet bridge loopback
 
 release: build containers cni-bundle
-	git status
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
 	docker push lstoll/eni-controller:$(VERSION)
 	docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:$(VERSION)
