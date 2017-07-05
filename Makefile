@@ -25,18 +25,14 @@ test:
 	go test -v $$(go list ./... | grep -v /vendor/)
 
 containers: build
-	docker build --build-arg BINARY=eni-controller -t eni-controller:$(VERSION) .
-	docker build --build-arg BINARY=vpcnet-configure -t vpcnet-configure:$(VERSION) .
-
-cni-bundle: build
-	cd build/bin && tar -zcvf ../cni-$(VERSION).tgz vpcnet bridge loopback
+	docker build -f Dockerfile.eni-controller -t eni-controller:$(VERSION) .
+	docker build -f Dockerfile.vpcnet-configure -t vpcnet-configure:$(VERSION) .
 
 release: build containers cni-bundle
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
 	docker push lstoll/eni-controller:$(VERSION)
 	docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:$(VERSION)
 	docker push lstoll/vpcnet-configure:$(VERSION)
-	aws s3 cp --acl public-read build/cni-$(VERSION).tgz s3://s3.lstoll.net/artifacts/k8s-vpcnet/cni/
 	cat manifest.yaml | sed -e "s/{{VERSION_TAG}}/$(VERSION)/g" | sed -e "s/{{TIMESTAMP}}/$(TIMESTAMP)/g" > $(TEMPDIR)/manifest-$(VERSION).yaml
 	aws s3 cp --acl public-read $(TEMPDIR)/manifest-$(VERSION).yaml s3://s3.lstoll.net/artifacts/k8s-vpcnet/manifest/
 # For now YOLO as latest, later become branch specific
@@ -46,6 +42,5 @@ release: build containers cni-bundle
 		docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:latest && \
 		docker push lstoll/vpcnet-configure:latest && \
 		aws s3 cp --acl public-read build/cni-$(VERSION).tgz s3://s3.lstoll.net/artifacts/k8s-vpcnet/cni/cni-latest.tgz && \
-		cat manifest.yaml | sed -e "s/{{VERSION_TAG}}/latest/g" | sed -e "s/{{TIMESTAMP}}/$(TIMESTAMP)/g" > $(TEMPDIR)/manifest-latest.yaml && \
-		aws s3 cp --acl public-read $(TEMPDIR)/manifest-latest.yaml s3://s3.lstoll.net/artifacts/k8s-vpcnet/manifest/ ; \
+		cat manifest.yaml | sed -e "s/{{VERSION_TAG}}/latest/g" | sed -e "s/{{TIMESTAMP}}/$(TIMESTAMP)/g" > $(TEMPDIR)/manifest-latest.yaml; \
 	fi
