@@ -265,12 +265,6 @@
 			"revisionTime": "2017-06-17T01:25:41Z"
 		},
 		{
-			"checksumSHA1": "jyrvlGVdjLuSpgTTEXn3zU5amHo=",
-			"path": "github.com/containernetworking/plugins/plugins/main/bridge",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
-		},
-		{
 			"checksumSHA1": "w5mUshYp2ClwfjttX1pvI88zHs0=",
 			"path": "github.com/containernetworking/plugins/plugins/main/loopback",
 			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",

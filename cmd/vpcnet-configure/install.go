@@ -22,7 +22,7 @@ const cniJSON = `{
 
 func installCNI() error {
 	// copy bins
-	for _, f := range []string{"vpcnet", "loopback", "bridge"} {
+	for _, f := range []string{"vpcnet", "loopback"} {
 		err := CopyFile("/opt/cni/bin/"+f, "/cni/"+f, 0755)
 		if err != nil {
 			return errors.Wrap(err, "Error copying CNI bin "+f)
