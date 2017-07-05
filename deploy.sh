@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 if [ -z "$1" ]; then
     echo "--> Pass in path to kubeconfig as first arg"

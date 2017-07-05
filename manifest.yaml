@@ -127,13 +127,27 @@ spec:
             privileged: true
           volumeMounts:
             - mountPath: /var/lib/cni
-              name: cnidir
+              name: cni-working
+            - mountPath: /etc/cni/net.d
+              name: cni-config
+            - mountPath: /opt/cni/bin
+              name: cni-bin
       volumes:
-        - name: cnidir
+        - name: cni-working
           hostPath:
             path: /var/lib/cni
+        - name: cni-config
+          hostPath:
+            path: /etc/cni/net.d
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
       tolerations:
+        # We can work without a network
         - key: "k8s-vpcnet/no-interface-configured"
+          effect: NoSchedule
+        # We should run on master too
+        - key: "node-role.kubernetes.io/master"
           effect: NoSchedule
 ---
 apiVersion: v1

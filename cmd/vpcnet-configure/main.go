@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"time"
 
@@ -53,6 +54,11 @@ func main() {
 
 	switch mode {
 	case "kubernetes-auto":
+		glog.Info("Installing CNI deps")
+		err := installCNI()
+		if err != nil {
+			log.Fatalf("Error installing CNI deps [%v]", err)
+		}
 		glog.Info("Running node configurator in on-cluster mode")
 		runk8s()
 		// TODO Poll for current running pods, delete lock files for gone pods.
