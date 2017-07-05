@@ -18,10 +18,13 @@ build:
 	$(GOBUILD) -o build/bin/eni-controller ./cmd/eni-controller
 	$(GOBUILD) -o build/bin/vpcnet-configure ./cmd/vpcnet-configure
 	$(GOBUILD) -o build/bin/loopback ./vendor/github.com/containernetworking/plugins/plugins/main/loopback
-	$(GOBUILD) -o build/bin/vpcnet ./cmd/cni-ipam-vpcnet
+	$(GOBUILD) -o build/bin/vpcnet ./cmd/cni-vpcnet
 
 test:
 	go test -v $$(go list ./... | grep -v /vendor/)
+
+vethtest:
+	sudo go test -v ./cmd/cni-vpcnet/ -vethtests
 
 containers: build
 	docker build -f Dockerfile.eni-controller -t eni-controller:$(VERSION) .

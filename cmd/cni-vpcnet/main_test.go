@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"os"
 	"path"
 	"testing"
@@ -15,10 +14,15 @@ import (
 	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
 )
 
-const testBr = "vpcbr0"
+type testVether struct {
+	hostIf        *current.Interface
+	contIf        *current.Interface
+	setupErr      error
+	teardownError error
+}
 
-var testMap = vpcnetstate.ENIMap{
-	testBr: &vpcnetstate.ENI{
+var testMap = vpcnetstate.ENIs{
+	&vpcnetstate.ENI{
 		EniID:       "eni-5d232b8d",
 		Attached:    true,
 		InterfaceIP: "10.0.8.96",
@@ -29,7 +33,20 @@ var testMap = vpcnetstate.ENIMap{
 	},
 }
 
-func TestIPAM(t *testing.T) {
+func (v *testVether) SetupVeth(cfg *Net, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
+	return v.hostIf, v.contIf, v.setupErr
+}
+
+func (v *testVether) TeardownVeth(netns, ifname string) error {
+	return v.teardownError
+}
+
+func TestMain(t *testing.T) {
+	origVether := defaultVether
+	tv := &testVether{}
+	defaultVether = tv
+	defer func() { defaultVether = origVether }()
+
 	workDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		t.Fatal(err)
@@ -52,57 +69,48 @@ func TestIPAM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	conf := fmt.Sprintf(`{
-		"cniVersion": "0.3.1",
-		"name": "vpcbr",
-		"type": "bridge",
-		"bridge": "%s",
-		"ipam": {
-			"type": "vpcnet",
-			"eni_map_path": "%s",
-			"data_dir": "%s"
-		}
-	}`, testBr, eniMapPath, dataDir)
-
 	nsPath := "/var/run/netns/dummy"
 	ifName := "conteth0"
+
+	cniJSON := fmt.Sprintf(`{
+		"cniVersion": "0.3.1",
+		"name": "vpcnet",
+		"type": "vpcnet",
+		"data_dir": "%s",
+		"eni_map_path": "%s"
+	}`, dataDir, eniMapPath)
 
 	args := &skel.CmdArgs{
 		ContainerID: "dummy",
 		Netns:       nsPath,
 		IfName:      ifName,
-		StdinData:   []byte(conf),
+		StdinData:   []byte(cniJSON),
+	}
+
+	tv.contIf = &current.Interface{
+		Name: "eth0",
+	}
+
+	tv.hostIf = &current.Interface{
+		Name: "veth123456",
 	}
 
 	// Allocate the IP
-	r, raw, err := testutils.CmdAddWithResult(nsPath, ifName, []byte(conf), func() error {
+	r, raw, err := testutils.CmdAddWithResult(nsPath, ifName, []byte(cniJSON), func() error {
 		return cmdAdd(args)
 	})
 
 	if err != nil {
-		t.Fatalf("Error executing add command [%v]", err)
+		t.Fatalf("Error calling add command [%+v]", err)
 	}
-
-	t.Logf("Add raw response: %s\n", string(raw))
 
 	result, ok := r.(*current.Result)
 	if !ok {
 		t.Fatalf("Expected result to be *current.Result: %+v", r)
 	}
 
-	found := false
-	for _, i := range testMap[testBr].IPs {
-		if result.IPs[0].Address.IP.Equal(net.ParseIP(i)) {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("Allocated IP %q that we're not configured to issue from %v", result.IPs[0].Address.IP.String(), testMap[testBr].IPs)
-	}
-
-	if result.IPs[0].Address.IP.Equal(result.Routes[1].GW) {
-		t.Error("Allocated bridge IP!")
-	}
+	t.Logf("%v", result)
+	t.Log(string(raw))
 
 	// Free the IP
 	err = testutils.CmdDelWithResult(nsPath, ifName, func() error {

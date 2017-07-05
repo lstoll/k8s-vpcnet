@@ -11,16 +11,21 @@ import (
 
 const cniJSON = `{
    "cniVersion": "0.3.1",
-   "name": "vpcbr0",
-   "type": "bridge",
-   "bridge": "vpcbr0",
-   "hairpinMode": true,
-    "ipam": {
-     "type": "vpcnet"
-   }
+   "name": "vpcnet",
+   "type": "vpcnet",
+   "log_verbosity": 2,
+   "ip_masq": true
  }`
 
 func installCNI() error {
+	err := os.MkdirAll("/opt/cni/bin", 0755)
+	if err != nil {
+		return errors.Wrap(err, "Error creating /opt/cni/bin/")
+	}
+	err = os.MkdirAll("/etc/cni/net.d", 0755)
+	if err != nil {
+		return errors.Wrap(err, "Error creating /etc/cni/net.d")
+	}
 	// copy bins
 	for _, f := range []string{"vpcnet", "loopback"} {
 		err := CopyFile("/opt/cni/bin/"+f, "/cni/"+f, 0755)
@@ -29,7 +34,7 @@ func installCNI() error {
 		}
 	}
 
-	err := ioutil.WriteFile("/etc/cni/net.d/10-vpcnet.conf", []byte(cniJSON), 0644)
+	err = ioutil.WriteFile("/etc/cni/net.d/10-vpcnet.conf", []byte(cniJSON), 0644)
 	if err != nil {
 		return errors.Wrap(err, "Error writing CNI configuration JSON")
 	}

@@ -27,7 +27,6 @@ spec:
           image: lstoll/eni-controller:{{.VersionTag}}
           imagePullPolicy: Always
           args:
-            - eni-controller
             - --v=2
           resources:
           # TODO -assess these limits
@@ -120,8 +119,7 @@ spec:
           image: lstoll/vpcnet-configure:{{.VersionTag}}
           imagePullPolicy: Always
           args:
-            - vpcnet-configure
-            - --v=2
+            - --v=4
           securityContext:
             # This is so we can manage interfaces
             privileged: true

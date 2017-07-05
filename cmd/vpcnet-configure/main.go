@@ -14,6 +14,7 @@ import (
 	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
 	"github.com/pkg/errors"
 
+	"github.com/lstoll/k8s-vpcnet/version"
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,13 +38,13 @@ const taintNoInterface = "k8s-vpcnet/no-interface-configured"
 func main() {
 	flag.Set("logtostderr", "true")
 
-	var mode, mac, bridge, ip, cb string
+	var mode, ifname, mac, ip, cb string
 
 	flag.StringVar(&mode, "mode", "kubernetes-auto", "Mode to run in. Default is normal on-cluster, or manual can be specified to configure directly")
 
 	// Manual
 	flag.StringVar(&mac, "host-mac", "", "[manual] MAC address of the ENI")
-	flag.StringVar(&bridge, "bridge-name", "", "[manual] name for the bridge")
+	flag.StringVar(&ifname, "interface-name", "", "[manual] name for the interface")
 	flag.StringVar(&ip, "ip", "", "[manual] IP address for the bridge")
 	flag.StringVar(&cb, "cidr-block", "", "[manual] VPC Subnet CIDR block (e.g 10.0.0.0/8")
 
@@ -64,16 +65,19 @@ func main() {
 		// TODO Poll for current running pods, delete lock files for gone pods.
 		// Should we just loop http://localhost:10255/pods/  ({"kind":"PodList"})
 	case "manual":
-		if mac == "" || bridge == "" || ip == "" || cb == "" {
+		if mac == "" || ifname == "" || ip == "" || cb == "" {
 			glog.Fatal("All args required in manual mode")
 		}
 		glog.Info("Configuring interfaces directly")
-		_, ipn, err := net.ParseCIDR(cb)
+		_, subnet, err := net.ParseCIDR(cb)
 		if err != nil {
 			glog.Fatalf("Error parsing subnet cidr [%v]", err)
 		}
-		ipn.IP = net.ParseIP(ip)
-		err = configureInterface(bridge, mac, ipn)
+		ifip := &net.IPNet{
+			IP:   net.ParseIP(ip),
+			Mask: subnet.Mask,
+		}
+		err = configureInterface(ifname, mac, ifip, subnet)
 		if err != nil {
 			glog.Fatalf("Error configuring interface [%v]", err)
 		}
@@ -191,35 +195,38 @@ func (c *controller) handleNode(key string) error {
 		return nil
 	}
 
-	configedMap := vpcnetstate.ENIMap{}
+	configedENIs := vpcnetstate.ENIs{}
 
-	for name, config := range nc {
+	for _, config := range nc {
 		if config.Attached {
 			glog.V(2).Infof("Node %s has interface %s attached", node.Name, config.EniID)
-			exists, err := interfaceExists(name)
+			exists, err := interfaceExists(config.InterfaceName())
 			if err != nil {
 				return err
 			}
 			if !exists {
-				glog.V(2).Infof("Node %s interface %s not configured, creating bridge %s", node.Name, config.EniID, name)
-				_, ipn, err := net.ParseCIDR(config.CIDRBlock)
+				glog.V(2).Infof("Node %s interface %s not configured, creating interface", node.Name, config.EniID)
+				_, subnet, err := net.ParseCIDR(config.CIDRBlock)
 				if err != nil {
 					return errors.Wrap(err, "Error parsing subnet cidr")
 				}
-				ipn.IP = net.ParseIP(config.InterfaceIP)
-				err = configureInterface(name, config.MACAddress, ipn)
+				ipn := &net.IPNet{
+					IP:   net.ParseIP(config.InterfaceIP),
+					Mask: subnet.Mask,
+				}
+				err = configureInterface(config.InterfaceName(), config.MACAddress, ipn, subnet)
 				if err != nil {
-					glog.Errorf("Error configuring interface %s on node %s", name, node.Name)
+					glog.Errorf("Error configuring interface %d on node %s", config.InterfaceName(), node.Name)
 					return err
 				}
 			}
-			configedMap[name] = config
+			configedENIs = append(configedENIs, config)
 		}
 	}
 
 	// batch write the addresses
-	glog.V(2).Infof("Node %s writing interface map for %d interfaces", node.Name, len(configedMap))
-	err = vpcnetstate.WriteENIMap(netconfPath, configedMap)
+	glog.V(2).Infof("Node %s writing interface map for %d interfaces", node.Name, len(configedENIs))
+	err = vpcnetstate.WriteENIMap(netconfPath, configedENIs)
 	if err != nil {
 		glog.Errorf("Error writing ENI map for %s", node.Name)
 		return err
@@ -332,7 +339,7 @@ func (c *controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	glog.Info("Starting Node controller")
+	glog.Infof("Starting Node controller version %s", version.Version)
 
 	go c.informer.Run(stopCh)
 

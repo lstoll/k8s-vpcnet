@@ -8,6 +8,7 @@ before_script:
 jobs:
   include:
     - stage: test
-      script: make build test
+      script: make build test && sudo $(which go) test -v ./cmd/cni-vpcnet/ -vethtests
+      sudo: true
     - stage: deploy
       script: make release

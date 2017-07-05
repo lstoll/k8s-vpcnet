@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
-	"syscall"
 
+	"github.com/golang/glog"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
@@ -13,7 +13,7 @@ const (
 	mtu = 1500
 )
 
-func configureInterface(bridgeName, mac string, ip *net.IPNet) error {
+func configureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IPNet) error {
 	// Find the interface AWS attached
 	ifs, err := net.Interfaces()
 	if err != nil {
@@ -34,47 +34,31 @@ func configureInterface(bridgeName, mac string, ip *net.IPNet) error {
 		return errors.Wrapf(err, "Error getting link %q", hostIf.Name)
 	}
 
-	// Create a bridge
-	br := &netlink.Bridge{
-		LinkAttrs: netlink.LinkAttrs{
-			Name:   bridgeName,
-			MTU:    mtu,
-			TxQLen: -1,
-		},
-	}
-
-	err = netlink.LinkAdd(br)
-	if err != nil && err != syscall.EEXIST {
-		return errors.Wrapf(err, "Error adding %q", bridgeName)
-	}
-
-	gbr, err := netlink.LinkByName(bridgeName)
+	err = netlink.LinkSetName(hostNLif, ifname)
 	if err != nil {
-		return errors.Wrapf(err, "Could not re-find bridge %q", bridgeName)
-	}
-	br, ok := gbr.(*netlink.Bridge)
-	if !ok {
-		return errors.Wrapf(err, "%q already exists, but is not a bridge", bridgeName)
+		return errors.Wrapf(err, "Error renaming interface %s to %s", hostIf.Name, ifname)
 	}
 
-	// Get the host interface, set it's master device to be the bridge
-	err = netlink.LinkSetMaster(hostNLif, br)
-	if err != nil {
-		return errors.Wrapf(err, "Error setting %q as master for %q", bridgeName, hostIf.Name)
-	}
-
-	if err := netlink.LinkSetUp(br); err != nil {
-		return errors.Wrapf(err, "Error bringing bridge %q up", bridgeName)
+	addr := &netlink.Addr{IPNet: ip, Label: ""}
+	if err := netlink.AddrAdd(hostNLif, addr); err != nil {
+		return errors.Wrapf(err, "Could not add %s to %s", ip, hostIf.Name)
 	}
 
 	if err := netlink.LinkSetUp(hostNLif); err != nil {
 		return errors.Wrapf(err, "Error bringing host interface %q up", hostIf.Name)
 	}
 
-	// Set the bridge's IP
-	addr := &netlink.Addr{IPNet: ip, Label: ""}
-	if err := netlink.AddrAdd(br, addr); err != nil {
-		return errors.Wrapf(err, "Could not add %s to %s", ip, bridgeName)
+	// TODO - drop any routes that are created automatically?
+
+	// Add a source route via this interface
+	err = netlink.RouteAdd(&netlink.Route{
+		LinkIndex: hostNLif.Attrs().Index,
+		Dst:       subnet,
+		Scope:     netlink.SCOPE_LINK,
+		Src:       ip.IP,
+	})
+	if err != nil {
+		return fmt.Errorf("Error adding source route to %s on interface %s", subnet.String(), ifname)
 	}
 
 	return nil
@@ -90,5 +74,6 @@ func interfaceExists(name string) (bool, error) {
 			return true, nil
 		}
 	}
+	glog.V(4).Infof("Interface %q not found in %v", name, ifs)
 	return false, nil
 }

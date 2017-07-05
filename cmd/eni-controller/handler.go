@@ -22,8 +22,6 @@ const (
 	// ipAddrCount is the number of addresses to assign to an ENI
 	// TODO - table out for instance type
 	ipAddrCount = 10
-	// brIf is the name of the interface we're using, for now.
-	brIf = "vpcbr0"
 )
 
 // handleNode is the business logic of the controller.
@@ -85,7 +83,7 @@ func (c *Controller) handleNode(key string) error {
 		// Static for now, we can change this when we use more than one ENI
 		// Start at 1, host IF is 0
 		newIf.Index = 1
-		ifsJSON, err := json.Marshal(vpcnetstate.ENIMap{brIf: newIf})
+		ifsJSON, err := json.Marshal(vpcnetstate.ENIs{newIf})
 		if err != nil {
 			glog.Infof("Node %s - error marshaling interface %v [%v]", node.Name, newIf, err)
 			return err
@@ -98,24 +96,26 @@ func (c *Controller) handleNode(key string) error {
 	}
 
 	// If we have an unattached interface, attach it
-	if !nc[brIf].Attached {
-		glog.Infof("Node %s has an unattached ENI, attaching it", node.Name)
-		err := c.attachENI(node, nc[brIf])
-		if err != nil {
-			return err
+	for _, eni := range nc {
+		if !eni.Attached {
+			glog.Infof("Node %s has an unattached ENI, attaching it", node.Name)
+			err := c.attachENI(node, eni)
+			if err != nil {
+				return err
+			}
+			// Static for now, we can change this when we use more than one ENI
+			eni.Attached = true
+			ifsJSON, err := json.Marshal(&nc)
+			if err != nil {
+				glog.Infof("Node %s - error marshaling interface %v [%v]", node.Name, nc, err)
+				return err
+			}
+			c.updateNode(node.Name, func(n *v1.Node) {
+				n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
+			})
+			// and bail out, next watch can take over
+			return nil
 		}
-		// Static for now, we can change this when we use more than one ENI
-		nc[brIf].Attached = true
-		ifsJSON, err := json.Marshal(&nc)
-		if err != nil {
-			glog.Infof("Node %s - error marshaling interface %v [%v]", node.Name, nc, err)
-			return err
-		}
-		c.updateNode(node.Name, func(n *v1.Node) {
-			n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
-		})
-		// and bail out, next watch can take over
-		return nil
 	}
 
 	return nil
