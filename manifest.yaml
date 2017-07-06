@@ -18,13 +18,13 @@ spec:
         app: eni-controller
       annotations:
         # use this to force deploy updates
-        template/timestamp: "{{TIMESTAMP}}"
+        template/timestamp: "{{.Timestamp}}"
     spec:
       serviceAccountName:  eni-controller
       hostNetwork: true
       containers:
         - name:  eni-controller
-          image: lstoll/eni-controller:{{VERSION_TAG}}
+          image: lstoll/eni-controller:{{.VersionTag}}
           imagePullPolicy: Always
           args:
             - eni-controller
@@ -111,13 +111,13 @@ spec:
         app: vpcnet-configure
       annotations:
         # use this to force deploy updates
-        template/timestamp: "{{TIMESTAMP}}"
+        template/timestamp: "{{.Timestamp}}"
     spec:
       hostNetwork: true
       serviceAccountName: vpcnet-configure
       containers:
         - name: vpcnet-configure
-          image: lstoll/vpcnet-configure:{{VERSION_TAG}}
+          image: lstoll/vpcnet-configure:{{.VersionTag}}
           imagePullPolicy: Always
           args:
             - vpcnet-configure
