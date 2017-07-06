@@ -41,6 +41,6 @@ release: build containers cni-bundle
 		docker push lstoll/eni-controller:latest && \
 		docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:latest && \
 		docker push lstoll/vpcnet-configure:latest && \
-		aws s3 cp --acl public-read build/cni-$(VERSION).tgz s3://s3.lstoll.net/artifacts/k8s-vpcnet/cni/cni-latest.tgz && \
-		cat manifest.yaml | sed -e "s/{{VERSION_TAG}}/latest/g" | sed -e "s/{{TIMESTAMP}}/$(TIMESTAMP)/g" > $(TEMPDIR)/manifest-latest.yaml; \
+		cat manifest.yaml | sed -e "s/{{VERSION_TAG}}/latest/g" | sed -e "s/{{TIMESTAMP}}/$(TIMESTAMP)/g" > $(TEMPDIR)/manifest-latest.yaml && \
+		aws s3 cp --acl public-read $(TEMPDIR)/manifest-latest.yaml s3://s3.lstoll.net/artifacts/k8s-vpcnet/manifest/; \
 	fi
