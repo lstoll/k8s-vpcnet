@@ -11,7 +11,7 @@ GOBUILD := CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -i -ldflags "-s -X git
 
 TEMPDIR := $(shell mktemp -d)
 
-all: build
+all: manifest-latest.yaml build
 
 build:
 	mkdir -p build/bin
@@ -29,6 +29,9 @@ vethtest:
 containers: build
 	docker build -f Dockerfile.eni-controller -t eni-controller:$(VERSION) .
 	docker build -f Dockerfile.vpcnet-configure -t vpcnet-configure:$(VERSION) .
+
+manifest-latest.yaml: manifest.yaml
+	cat manifest.yaml | sed -e "s/{{\\.VersionTag}}/latest/g" | sed -e "s/{{\\.Timestamp}}//g" > manifest-latest.yaml
 
 release: build containers cni-bundle
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
