@@ -1,0 +1,178 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: eni-controller
+  namespace: kube-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eni-controller
+  template:
+    metadata:
+      labels:
+      #  k8s-addon: cluster-autoscaler.addons.k8s.io
+        app: eni-controller
+      annotations:
+        # use this to force deploy updates
+        template/timestamp: ""
+    spec:
+      serviceAccountName:  eni-controller
+      hostNetwork: true
+      containers:
+        - name:  eni-controller
+          image: lstoll/eni-controller:latest
+          imagePullPolicy: Always
+          args:
+            - --v=2
+          resources:
+          # TODO -assess these limits
+            limits:
+              cpu: 100m
+              memory: 300Mi
+            requests:
+              cpu: 100m
+              memory: 300Mi
+      # Schedule on the master. Because this is critical for networking, we
+      # can't bring up any pods until this is running. To avoid all runtimes
+      # needing IAM privs to manage interfaces, we can run it in a cluster
+      # privileged context, ignoring network setup restrictions
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      tolerations:
+        - key: "node-role.kubernetes.io/master"
+          effect: NoSchedule
+        - key: "k8s-vpcnet/no-interface-configured"
+          effect: NoSchedule
+      hostNetwork: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+  name: eni-controller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: eni-controller
+  namespace: kube-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - watch
+  - list
+  - get
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name:  eni-controller
+  namespace: kube-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: eni-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name:  eni-controller
+subjects:
+  - kind: ServiceAccount
+    name:  eni-controller
+    namespace: kube-system
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: vpcnet-configure
+  namespace: kube-system
+  labels:
+    app: vpcnet-configure
+spec:
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: vpcnet-configure
+      annotations:
+        # use this to force deploy updates
+        template/timestamp: ""
+    spec:
+      hostNetwork: true
+      serviceAccountName: vpcnet-configure
+      containers:
+        - name: vpcnet-configure
+          image: lstoll/vpcnet-configure:latest
+          imagePullPolicy: Always
+          args:
+            - --v=4
+          securityContext:
+            # This is so we can manage interfaces
+            privileged: true
+          volumeMounts:
+            - mountPath: /var/lib/cni
+              name: cni-working
+            - mountPath: /etc/cni/net.d
+              name: cni-config
+            - mountPath: /opt/cni/bin
+              name: cni-bin
+      volumes:
+        - name: cni-working
+          hostPath:
+            path: /var/lib/cni
+        - name: cni-config
+          hostPath:
+            path: /etc/cni/net.d
+        - name: cni-bin
+          hostPath:
+            path: /opt/cni/bin
+      tolerations:
+        # We can work without a network
+        - key: "k8s-vpcnet/no-interface-configured"
+          effect: NoSchedule
+        # We should run on master too
+        - key: "node-role.kubernetes.io/master"
+          effect: NoSchedule
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: vpcnet-configure
+  name: vpcnet-configure
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: vpcnet-configure
+  namespace: kube-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: vpcnet-configure
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - watch
+  - list
+  - get
+  - update
+---
