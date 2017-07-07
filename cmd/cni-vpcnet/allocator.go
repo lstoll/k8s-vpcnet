@@ -8,8 +8,6 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/containernetworking/cni/pkg/types"
-	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
 	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
 )
@@ -19,52 +17,22 @@ import (
 var ErrEmptyPool = errors.New("No free private IPs found on interface")
 
 // IPAllocator is the implementation of the actual allocator
-type IPAllocator struct {
+type ipAllocator struct {
 	conf   *Net
 	store  *disk.Store
-	eniMap vpcnetstate.ENIMap
+	eniMap vpcnetstate.ENIs
 }
 
 // Get returns newly allocated IP along with its config
-func (a *IPAllocator) Get(id string) (types.Result, error) {
+func (a *ipAllocator) Get(id string) (*podNet, error) {
 	a.store.Lock()
 	defer a.store.Unlock()
 
-	brIf := a.conf.Bridge
-
-	config, ok := a.eniMap[brIf]
-	if !ok {
-		return nil, fmt.Errorf("No entry for interface %s in ENI config map", brIf)
+	// TODO - handle multiple ENI's
+	if len(a.eniMap) != 1 {
+		return nil, fmt.Errorf("We can only handle a single ENI, found %d", len(a.eniMap))
 	}
-
-	ret := &current.Result{}
-
-	// bridge mode is always this, and routed via host
-	_, subnet, err := net.ParseCIDR("0.0.0.0/32")
-	if err != nil {
-		panic(err)
-	}
-
-	// route to brip/32 is a interface route
-	brNet := net.IPNet{
-		IP:   net.ParseIP(config.InterfaceIP),
-		Mask: net.IPv4Mask(255, 255, 255, 255),
-	}
-
-	_, defNet, err := net.ParseCIDR("0.0.0.0/0")
-	if err != nil {
-		panic(err)
-	}
-
-	ret.Routes = []*types.Route{
-		{
-			Dst: brNet,
-		},
-		{
-			Dst: *defNet,
-			GW:  net.ParseIP(config.InterfaceIP),
-		},
-	}
+	config := a.eniMap[0]
 
 	ips := []net.IP{}
 	for _, i := range config.IPs {
@@ -78,7 +46,7 @@ func (a *IPAllocator) Get(id string) (types.Result, error) {
 	// Sort to ensure consistent ordering, for handling last used etc.
 	sort.Sort(netIps(ips))
 
-	lastReservedIP, err := a.store.LastReservedIP(brIf)
+	lastReservedIP, err := a.store.LastReservedIP(config.InterfaceName())
 	if err != nil || lastReservedIP == nil {
 		// Likely no last reserved. Just start from the beginning
 	} else {
@@ -93,9 +61,9 @@ func (a *IPAllocator) Get(id string) (types.Result, error) {
 	// Walk until we find a free IPs
 	var reservedIP net.IP
 	for _, ip := range ips {
-		reserved, err := a.store.Reserve(id, ip, brIf)
+		reserved, err := a.store.Reserve(id, ip, config.InterfaceName())
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "Error reserving IP in store")
 		}
 		if reserved {
 			reservedIP = ip
@@ -104,24 +72,22 @@ func (a *IPAllocator) Get(id string) (types.Result, error) {
 	}
 
 	if reservedIP == nil {
-		return nil, fmt.Errorf("Could not allocate IP for network %s interface %s", a.conf.Name, brIf)
+		return nil, fmt.Errorf("Could not allocate IP for network %s interface %s", a.conf.Name, config.InterfaceName())
 	}
 
-	ret.IPs = []*current.IPConfig{
-		{
-			Version: "4",
-			Address: net.IPNet{
-				IP:   reservedIP,
-				Mask: subnet.Mask,
-			},
-		},
-	}
+	_, eniSubnet, err := net.ParseCIDR(config.CIDRBlock)
 
-	return ret, nil
+	return &podNet{
+		ContainerIP:  reservedIP,
+		ENIIp:        net.IPNet{IP: net.ParseIP(config.InterfaceIP), Mask: eniSubnet.Mask},
+		ENIInterface: config.InterfaceName(),
+		ENISubnet:    eniSubnet,
+		ENI:          config,
+	}, nil
 }
 
-// Release releases all IPs allocated for the container with given ID
-func (a *IPAllocator) Release(id string) error {
+// Release releases all IPs allocated for the container with given ID.
+func (a *ipAllocator) Release(id string) error {
 	a.store.Lock()
 	defer a.store.Unlock()
 

@@ -2,6 +2,7 @@ package vpcnetstate
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -17,29 +18,34 @@ const DefaultENIMapPath = "/var/lib/cni/vpcnet/eni_map.json"
 // configuration
 const IFSKey = "eni-interfaces"
 
-// ENIMap is the data type we store on a node
-type ENIMap map[string]*ENI
+// ENIs is the list of ENI's we store on a node
+type ENIs []*ENI
 
 // ENI represents the configuration for a single ENI
 type ENI struct {
 	EniID       string   `json:"eni_id"`
 	Attached    bool     `json:"attached"`
 	InterfaceIP string   `json:"interface_ip"`
-	CIDRBlock   string   `json:"cidr_block"`
 	Index       int      `json:"index"`
+	CIDRBlock   string   `json:"cidr_block"`
 	IPs         []string `json:"ips"`
 	MACAddress  string   `json:"mac_address"`
 }
 
+// InterfaceName returns the name this ENI should have on the host
+func (e *ENI) InterfaceName() string {
+	return fmt.Sprintf("eni%d", e.Index)
+}
+
 // ENIConfigFromAnnotations returns checks for configuration, returning it if found or
 // nil if it isn't
-func ENIConfigFromAnnotations(annotations map[string]string) (ENIMap, error) {
+func ENIConfigFromAnnotations(annotations map[string]string) (ENIs, error) {
 	ifs, ok := annotations[IFSKey]
 	if !ok {
 		return nil, nil
 	}
 
-	nc := make(map[string]*ENI)
+	nc := []*ENI{}
 
 	err := json.Unmarshal([]byte(ifs), &nc)
 	if err != nil {
@@ -50,7 +56,7 @@ func ENIConfigFromAnnotations(annotations map[string]string) (ENIMap, error) {
 }
 
 // WriteENIMap persists the map to disk
-func WriteENIMap(path string, em ENIMap) error {
+func WriteENIMap(path string, em ENIs) error {
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
 	b, err := json.Marshal(em)
 	if err != nil {
@@ -64,12 +70,12 @@ func WriteENIMap(path string, em ENIMap) error {
 }
 
 // ReadENIMap loads the map from disk
-func ReadENIMap(path string) (ENIMap, error) {
+func ReadENIMap(path string) (ENIs, error) {
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	am := ENIMap{}
+	am := ENIs{}
 	err = json.Unmarshal(b, &am)
 	if err != nil {
 		return nil, err

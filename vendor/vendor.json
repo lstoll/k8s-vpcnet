@@ -217,64 +217,58 @@
 			"revisionTime": "2017-06-29T09:06:28Z"
 		},
 		{
-			"checksumSHA1": "Omgb6U9PjJc9SaNc0I1b0VZLAVc=",
+			"checksumSHA1": "BUj+UEIzHmUAfGD4c/srsQJ4TY8=",
 			"path": "github.com/containernetworking/plugins/pkg/ip",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
-			"checksumSHA1": "UtLHdgTwnAuh2UoI2nZj9Oz+IGE=",
+			"checksumSHA1": "kR8rb+saRyrxv5KqGcw4urd5Ugs=",
 			"path": "github.com/containernetworking/plugins/pkg/ipam",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "wmZ5nRpAN/myLfAzVpPR1RxnoFQ=",
 			"path": "github.com/containernetworking/plugins/pkg/ns",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
-			"checksumSHA1": "Jp1NUGzBq9t8splKYuwXyT7JYWk=",
+			"checksumSHA1": "aoBZm33Kl5fj3lV8YEcE/YEJB/8=",
 			"path": "github.com/containernetworking/plugins/pkg/testutils",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "909B5R5pbQLe7y6cgMlr8d0aLO0=",
 			"path": "github.com/containernetworking/plugins/pkg/utils",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "rUAk+nce6eDIWtYo/QYIoqlTfrY=",
 			"path": "github.com/containernetworking/plugins/pkg/utils/hwaddr",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "FrpnoHYv9g9aLu/ObDdNyYImTCo=",
 			"path": "github.com/containernetworking/plugins/plugins/ipam/host-local/backend",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "loPdXSI1MAI8Eq/4Tn0UmzOCBSc=",
 			"path": "github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
-		},
-		{
-			"checksumSHA1": "jyrvlGVdjLuSpgTTEXn3zU5amHo=",
-			"path": "github.com/containernetworking/plugins/plugins/main/bridge",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "w5mUshYp2ClwfjttX1pvI88zHs0=",
 			"path": "github.com/containernetworking/plugins/plugins/main/loopback",
-			"revision": "1b8cc172ea80e1d337d6c1abbb711cbb6f60ea7a",
-			"revisionTime": "2017-06-17T01:25:41Z"
+			"revision": "e7328869fa65443100988b76fc5d2053fafe6075",
+			"revisionTime": "2017-07-05T21:39:48Z"
 		},
 		{
 			"checksumSHA1": "RBwpnMpfQt7Jo7YWrRph0Vwe+f0=",
@@ -705,6 +699,18 @@
 			"revisionTime": "2017-02-27T22:00:37Z"
 		},
 		{
+			"checksumSHA1": "R3qFe7+JDLGggKkccez2Il3dBfk=",
+			"path": "github.com/songgao/packets/ethernet",
+			"revision": "549a10cd4091c1e78542d3bb357036299cb9fcd6",
+			"revisionTime": "2016-04-04T18:24:56Z"
+		},
+		{
+			"checksumSHA1": "8FxjzTQlJ9MRrGdAxivRvXhijTU=",
+			"path": "github.com/songgao/water",
+			"revision": "99d07fc117afd4d997bc5ebca77c241644ffe24a",
+			"revisionTime": "2017-05-24T16:52:02Z"
+		},
+		{
 			"checksumSHA1": "STxYqRb4gnlSr3mRpT+Igfdz/kM=",
 			"path": "github.com/spf13/pflag",
 			"revision": "e57e3eeb33f795204c1ca35f56c44f83227c6e66",
@@ -717,16 +723,16 @@
 			"revisionTime": "2017-06-20T10:48:52Z"
 		},
 		{
-			"checksumSHA1": "ZuDsOhY1ZhBBmZ8vn7FuXXQuCc4=",
+			"checksumSHA1": "Ycsitqt7s9EhEQAH1d08oPLUydU=",
 			"path": "github.com/vishvananda/netlink",
-			"revision": "fe3b5664d23a11b52ba59bece4ff29c52772a56b",
-			"revisionTime": "2017-02-19T03:22:09Z"
+			"revision": "a43807d906632b0f047158fc32b5932784918abe",
+			"revisionTime": "2017-06-24T04:55:36Z"
 		},
 		{
-			"checksumSHA1": "J0FWg5W1n0qNtyXdbTENfzSaTEU=",
+			"checksumSHA1": "c7fZyuHPLk0rPr41M8X6SnFtYjk=",
 			"path": "github.com/vishvananda/netlink/nl",
-			"revision": "fe3b5664d23a11b52ba59bece4ff29c52772a56b",
-			"revisionTime": "2017-02-19T03:22:09Z"
+			"revision": "a43807d906632b0f047158fc32b5932784918abe",
+			"revisionTime": "2017-06-24T04:55:36Z"
 		},
 		{
 			"checksumSHA1": "9jjO5GjLa0XF/nfWihF02RoH4qc=",
@@ -787,6 +793,18 @@
 		{
 			"path": "golang.org/x/oauth2/jwt",
 			"revision": "cce311a261e6fcf29de72ca96827bdb0b7d9c9e6"
+		},
+		{
+			"checksumSHA1": "Pki0iA65Dtsjh4gtabPkp/lOa2I=",
+			"path": "golang.org/x/sys/windows",
+			"revision": "739734461d1c916b6c72a63d7efda2b27edb369f",
+			"revisionTime": "2017-07-07T11:51:12Z"
+		},
+		{
+			"checksumSHA1": "ZdFZFaXmCgEEaEhVPkyXrnhKhsg=",
+			"path": "golang.org/x/sys/windows/registry",
+			"revision": "739734461d1c916b6c72a63d7efda2b27edb369f",
+			"revisionTime": "2017-07-07T11:51:12Z"
 		},
 		{
 			"checksumSHA1": "DWHpSSH7hmB31XvpQqFDshcRU+4=",
