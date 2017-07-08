@@ -28,6 +28,9 @@ type CNI struct {
 	// IPMasq will write outbound masquerate iptables rules
 	IPMasq bool `json:"ip_masq"`
 
+	// ClusterCIDR is the CIDR in which pods will run in
+	ClusterCIDR *net.IPNet `json:"cluster_cidr"`
+
 	// ServiceCIDR is the CIDR for the cluster services network. This is needed
 	// to ensure the correct routing for this interface.
 	ServiceCIDR *net.IPNet `json:"service_cidr"`
@@ -52,6 +55,7 @@ func WriteCNIConfig(c *config.Config) error {
 		// Let the paths just use the defaults
 		IPMasq:       c.Network.PodIPMasq,
 		ServiceCIDR:  c.Network.ServiceCIDR.IPNet(),
+		ClusterCIDR:  c.Network.ClusterCIDR.IPNet(),
 		LogVerbosity: c.Logging.CNIVLevel,
 	}
 

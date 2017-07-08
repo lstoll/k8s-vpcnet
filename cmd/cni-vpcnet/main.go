@@ -105,7 +105,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 			args.ContainerID,
 			alloced.ContainerIP,
 			// Don't masq our traffic, or (service traffic? or does service traffic need to masq from a diff IP?)
-			[]*net.IPNet{alloced.ENISubnet, conf.ServiceCIDR},
+			[]*net.IPNet{conf.ClusterCIDR, conf.ServiceCIDR},
 		)
 		if err != nil {
 			return errors.Wrap(err, "Error inserting IPTables rule")
