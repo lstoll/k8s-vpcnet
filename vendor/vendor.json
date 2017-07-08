@@ -507,6 +507,12 @@
 			"revisionTime": "2017-04-11T07:14:55Z"
 		},
 		{
+			"checksumSHA1": "MAIa4r4/QfPXhgeYx7jZHm+Srs8=",
+			"path": "github.com/mgutz/str",
+			"revision": "968bf66e3da857419e4f6e71b2d5c9ae95682dc4",
+			"revisionTime": "2015-06-23T15:38:27Z"
+		},
+		{
 			"checksumSHA1": "EHjhpHipgm+XGccrRAms9AW3Ewk=",
 			"path": "github.com/mitchellh/mapstructure",
 			"revision": "d0303fe809921458f417bcf828397a65db30a7e4",
