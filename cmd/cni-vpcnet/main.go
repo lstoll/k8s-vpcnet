@@ -6,8 +6,6 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/containernetworking/plugins/pkg/ip"
-	"github.com/containernetworking/plugins/pkg/utils"
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
@@ -17,6 +15,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/ipmasq"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
@@ -101,12 +100,12 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 	}
 
 	if conf.IPMasq {
-		chain := utils.FormatChainName(conf.Name, args.ContainerID)
-		comment := utils.FormatComment(conf.Name, args.ContainerID)
-		err := ip.SetupIPMasq(
-			&net.IPNet{IP: alloced.ContainerIP, Mask: alloced.ENISubnet.Mask},
-			chain,
-			comment,
+		err := ipmasq.Setup(
+			conf.Name,
+			args.ContainerID,
+			alloced.ContainerIP,
+			// Don't masq our traffic, or (service traffic? or does service traffic need to masq from a diff IP?)
+			[]*net.IPNet{alloced.ENISubnet, conf.ServiceCIDR},
 		)
 		if err != nil {
 			return errors.Wrap(err, "Error inserting IPTables rule")
@@ -152,7 +151,12 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
 	}
 
-	// TODO - tear down iptables rule too. Could lean on better persistence here too.
+	if conf.IPMasq {
+		err := ipmasq.Teardown(conf.Name, args.ContainerID)
+		if err != nil {
+			return errors.Wrap(err, "Error tearing down iptables rules")
+		}
+	}
 
 	return nil
 }
