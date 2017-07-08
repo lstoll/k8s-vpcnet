@@ -147,7 +147,7 @@ func (v *vetherImpl) SetupVeth(cfg *config.CNI, netnsPath string, ifName string,
 	}
 
 	// Ensure we have the default out route for this eni's frompod table
-	err = ensureFromPodRoute(podNet.ENI.Index, hostENIIf.Attrs().Index, podNet.ENISubnet, cfg.ServiceCIDR, cfg.IPMasq)
+	err = ensureFromPodRoute(podNet.ENI.Index, hostENIIf.Attrs().Index, podNet.ENISubnet, cfg.ClusterCIDR, cfg.ServiceCIDR, cfg.IPMasq)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "Error ensuring from pod default route exists for eni%d", podNet.ENI.Index)
 	}
@@ -206,7 +206,7 @@ func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) 
 	return []*netlink.Rule{fromRule, toRule}
 }
 
-func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, serviceCIDR *net.IPNet, ipMasq bool) error {
+func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, clusterCIDR *net.IPNet, serviceCIDR *net.IPNet, ipMasq bool) error {
 	// VPC gateway is first address in subnet
 	gw := net.ParseIP(eniSubnet.IP.String()).To4()
 	gw[3]++
@@ -219,9 +219,21 @@ func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, 
 			Table:     fromPodRTBase + eniAttachIndex,
 			LinkIndex: eniLinkIndex,
 			Dst:       serviceCIDR,
-			Scope:     netlink.SCOPE_LINK,
+			//Scope:     netlink.SCOPE_LINK, Direct all service traffic via the
+			// VPC gateway, it can figure stuff out.
+			Scope: netlink.SCOPE_UNIVERSE,
+			Gw:    gw,
 		})
 	}
+
+	// Route the greater cluster network via the ENI gateway
+	routes = append(routes, &netlink.Route{
+		Table:     fromPodRTBase + eniAttachIndex,
+		LinkIndex: eniLinkIndex,
+		Dst:       clusterCIDR,
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Gw:        gw,
+	})
 
 	if ipMasq {
 		// If we're masquerading, we want non-local interface traffic to leave
@@ -247,7 +259,7 @@ func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, 
 			LinkIndex: eth0.Attrs().Index,
 			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
 			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        gw, // TODO - what happens if this interface is on another subnet?
+			Gw:        gw, // TODO - what happens eth0 is on another subnet?
 		})
 
 	} else {

@@ -6,6 +6,8 @@ metadata:
 data:
   config.toml: |
     [network]
+    # The range that pods will run in.
+    cluster_cidr = "10.0.0.0/18"
     # The service range for the network. This is needed, because we need to
     # explicitly link route it via the ENI, and there doesn't seem to be a way
     # to easily infer/discover this

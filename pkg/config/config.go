@@ -48,6 +48,8 @@ type Config struct {
 
 // Network is the network topology related configuration for this cluster
 type Network struct {
+	// ClusterCIDR is the CIDR in which pods will run in
+	ClusterCIDR *IPNet `toml:"cluster_cidr"`
 	// ServiceCIDR is the CIDR for cluster services
 	ServiceCIDR *IPNet `toml:"service_cidr"`
 	// PodIPMasq indicated if we should masquerade external pod traffic from the
