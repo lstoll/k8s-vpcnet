@@ -8,7 +8,8 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/songgao/packets/ethernet"
 	"github.com/songgao/water"
 	"github.com/vishvananda/netlink"
@@ -102,7 +103,7 @@ func TestVeth(t *testing.T) {
 
 			// Run the creation in our fake host netns
 			err = hostNS.Do(func(ns.NetNS) error {
-				_, _, err = v.SetupVeth(&Net{IPMasq: tc.Masq}, contNS.Path(), "eth0", pn)
+				_, _, err = v.SetupVeth(&config.CNI{IPMasq: tc.Masq}, contNS.Path(), "eth0", pn)
 				return err
 			})
 			if err != nil {

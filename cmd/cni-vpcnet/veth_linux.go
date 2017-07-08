@@ -12,6 +12,7 @@ import (
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/golang/glog"
 	"github.com/j-keck/arping"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
@@ -24,9 +25,11 @@ const (
 // When should this not just be 9000?
 const mtu = 1500
 
-type vetherImpl struct{}
+type vetherImpl struct {
+	cfg *config.CNI
+}
 
-func (v *vetherImpl) SetupVeth(cfg *Net, netnsPath string, ifName string, podNet *podNet) (*current.Interface, *current.Interface, error) {
+func (v *vetherImpl) SetupVeth(cfg *config.CNI, netnsPath string, ifName string, podNet *podNet) (*current.Interface, *current.Interface, error) {
 	hostInterface := &current.Interface{}
 	containerInterface := &current.Interface{}
 
@@ -144,7 +147,7 @@ func (v *vetherImpl) SetupVeth(cfg *Net, netnsPath string, ifName string, podNet
 	}
 
 	// Ensure we have the default out route for this eni's frompod table
-	err = ensureFromPodRoute(podNet.ENI.Index, hostENIIf.Attrs().Index, podNet.ENISubnet, cfg.IPMasq)
+	err = ensureFromPodRoute(podNet.ENI.Index, hostENIIf.Attrs().Index, podNet.ENISubnet, cfg.ServiceCIDR, cfg.IPMasq)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "Error ensuring from pod default route exists for eni%d", podNet.ENI.Index)
 	}
@@ -203,19 +206,28 @@ func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) 
 	return []*netlink.Rule{fromRule, toRule}
 }
 
-func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, ipMasq bool) error {
+func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, serviceCIDR *net.IPNet, ipMasq bool) error {
 	// VPC gateway is first address in subnet
 	gw := net.ParseIP(eniSubnet.IP.String()).To4()
 	gw[3]++
 
 	var routes []*netlink.Route
 
-	if ipMasq {
-		// If we're masquerading, we want non-local interface traffic to
-		// leave the main interface via it's default route, so it'll be masqeraded as the host.
+	// Set this regardless, we can treat internal service stuff as local
+	if serviceCIDR != nil {
+		routes = append(routes, &netlink.Route{
+			Table:     fromPodRTBase + eniAttachIndex,
+			LinkIndex: eniLinkIndex,
+			Dst:       serviceCIDR,
+			Scope:     netlink.SCOPE_LINK,
+		})
+	}
 
-		// This will probably involve us adding a route that has it's link index set to eth0. Confirm
-		// if we'll need to have a route for the eni subnet itself?
+	if ipMasq {
+		// If we're masquerading, we want non-local interface traffic to leave
+		// the main interface via it's default route, so it'll be masqeraded as
+		// the host. We need to make sure local traffic and service traffic is
+		// still pushed out the eni
 
 		// TODO - have this configured, or inferred smarter?
 		eth0, err := netlink.LinkByName("eth0")
@@ -223,31 +235,30 @@ func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, 
 			return errors.Wrap(err, "failed to lookup eth0")
 		}
 
-		routes = []*netlink.Route{
-			{
-				Table:     fromPodRTBase + eniAttachIndex,
-				LinkIndex: eniLinkIndex,
-				Dst:       eniSubnet,
-				Scope:     netlink.SCOPE_LINK,
-			},
-			{
-				Table:     fromPodRTBase + eniAttachIndex,
-				LinkIndex: eth0.Attrs().Index,
-				Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gw, // TODO - what happens if this interface is on another subnet?
-			},
-		}
+		routes = append(routes, &netlink.Route{
+			Table:     fromPodRTBase + eniAttachIndex,
+			LinkIndex: eniLinkIndex,
+			Dst:       eniSubnet,
+			Scope:     netlink.SCOPE_LINK,
+		})
+
+		routes = append(routes, &netlink.Route{
+			Table:     fromPodRTBase + eniAttachIndex,
+			LinkIndex: eth0.Attrs().Index,
+			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        gw, // TODO - what happens if this interface is on another subnet?
+		})
+
 	} else {
-		routes = []*netlink.Route{
-			{
-				Table:     fromPodRTBase + eniAttachIndex,
-				LinkIndex: eniLinkIndex,
-				Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-				Scope:     netlink.SCOPE_UNIVERSE,
-				Gw:        gw,
-			},
-		}
+		routes = append(routes, &netlink.Route{
+			Table:     fromPodRTBase + eniAttachIndex,
+			LinkIndex: eniLinkIndex,
+			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        gw,
+		})
+
 	}
 
 	// fromPodRT should default route from via the ENI interface

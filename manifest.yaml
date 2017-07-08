@@ -1,3 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vpcnet-configuration
+  namespace: kube-system
+data:
+  config.toml: |
+    [network]
+    # The service range for the network. This is needed, because we need to
+    # explicitly link route it via the ENI, and there doesn't seem to be a way
+    # to easily infer/discover this
+    service_cidr = "100.64.0.0/10"
+    # If we should masquerade non-cluster traffic for pods out of the instances
+    # main interface. Generally this will be desired, unless you have a NAT
+    # Gateway set on the subnet the pods reside in.
+    pod_ip_masq = true
+
+    [logging]
+    # The verbosity level for CNI plugin. Higher to begin with, to make sure we
+    # have diagnostic info
+    cni_v_level = 2
+---
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
@@ -36,6 +58,13 @@ spec:
             requests:
               cpu: 100m
               memory: 300Mi
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/vpcnet
+      volumes:
+        - name: config-volume
+          configMap:
+            name: vpcnet-configuration
       # Schedule on the master. Because this is critical for networking, we
       # can't bring up any pods until this is running. To avoid all runtimes
       # needing IAM privs to manage interfaces, we can run it in a cluster
@@ -120,6 +149,9 @@ spec:
           imagePullPolicy: Always
           args:
             - --v=4
+          envFrom:
+            - configMapRef:
+                name: vpcnet-configuration
           securityContext:
             # This is so we can manage interfaces
             privileged: true
@@ -130,6 +162,8 @@ spec:
               name: cni-config
             - mountPath: /opt/cni/bin
               name: cni-bin
+            - mountPath: /etc/vpcnet
+              name: config-volume
       volumes:
         - name: cni-working
           hostPath:
@@ -140,6 +174,9 @@ spec:
         - name: cni-bin
           hostPath:
             path: /opt/cni/bin
+        - name: config-volume
+          configMap:
+            name: vpcnet-configuration
       tolerations:
         # We can work without a network
         - key: "k8s-vpcnet/no-interface-configured"

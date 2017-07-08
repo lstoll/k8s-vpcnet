@@ -11,8 +11,10 @@ Vagrant.configure("2") do |config|
   config.vm.provision "shell", inline: <<-SHELL
 if [ ! -d /usr/local/go ]; then
   curl -sL https://storage.googleapis.com/golang/go1.8.3.linux-amd64.tar.gz | tar -zx -C /usr/local
-  echo 'export PATH=/usr/local/go/bin:$PATH' > /etc/profile.d/go.sh
-  echo 'export GOPATH=/go' >> /etc/profile.d/go.sh
+  echo 'export PATH=/usr/local/go/bin:$PATH' >> ~ubuntu/.bashrc
+  echo 'export PATH=/usr/local/go/bin:$PATH' >> ~root/.bashrc
+  echo 'export GOPATH=/go' >> ~ubuntu/.bashrc
+  echo 'export GOPATH=/go' >> ~ubuntu/.bashrc
 fi
 if [ ! -f /usr/bin/gcc ]; then
   apt-get update

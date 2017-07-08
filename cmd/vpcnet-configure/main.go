@@ -11,7 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
-	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
 
 	"github.com/lstoll/k8s-vpcnet/version"
@@ -55,8 +56,12 @@ func main() {
 
 	switch mode {
 	case "kubernetes-auto":
+		cfg, err := config.Load(config.DefaultConfigPath)
+		if err != nil {
+			log.Fatalf("Error loading configuration [%+v]", err)
+		}
 		glog.Info("Installing CNI deps")
-		err := installCNI()
+		err = installCNI(cfg)
 		if err != nil {
 			log.Fatalf("Error installing CNI deps [%v]", err)
 		}

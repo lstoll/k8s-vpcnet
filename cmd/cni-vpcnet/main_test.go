@@ -11,7 +11,8 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
 type testVether struct {
@@ -33,7 +34,7 @@ var testMap = vpcnetstate.ENIs{
 	},
 }
 
-func (v *testVether) SetupVeth(cfg *Net, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
+func (v *testVether) SetupVeth(cfg *config.CNI, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
 	return v.hostIf, v.contIf, v.setupErr
 }
 
@@ -42,11 +43,10 @@ func (v *testVether) TeardownVeth(netns, ifname string) error {
 }
 
 func TestMain(t *testing.T) {
-	origVether := defaultVether
 	tv := &testVether{}
-	defaultVether = tv
-	defer func() { defaultVether = origVether }()
-
+	runner := &cniRunner{
+		vether: tv,
+	}
 	workDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestMain(t *testing.T) {
 
 	// Allocate the IP
 	r, raw, err := testutils.CmdAddWithResult(nsPath, ifName, []byte(cniJSON), func() error {
-		return cmdAdd(args)
+		return runner.cmdAdd(args)
 	})
 
 	if err != nil {
@@ -114,7 +114,7 @@ func TestMain(t *testing.T) {
 
 	// Free the IP
 	err = testutils.CmdDelWithResult(nsPath, ifName, func() error {
-		return cmdDel(args)
+		return runner.cmdDel(args)
 	})
 
 	if err != nil {

@@ -33,7 +33,7 @@ containers: build
 manifest-latest.yaml: manifest.yaml
 	cat manifest.yaml | sed -e "s/{{\\.VersionTag}}/latest/g" | sed -e "s/{{\\.Timestamp}}//g" > manifest-latest.yaml
 
-release: build containers cni-bundle
+release: build containers manifest-latest.yaml
 	docker tag eni-controller:$(VERSION) lstoll/eni-controller:$(VERSION)
 	docker push lstoll/eni-controller:$(VERSION)
 	docker tag vpcnet-configure:$(VERSION) lstoll/vpcnet-configure:$(VERSION)
