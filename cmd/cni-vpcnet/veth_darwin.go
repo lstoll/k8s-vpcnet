@@ -1,10 +1,13 @@
 package main
 
-import "github.com/containernetworking/cni/pkg/types/current"
+import (
+	"github.com/containernetworking/cni/pkg/types/current"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+)
 
 type vetherImpl struct{}
 
-func (v *vetherImpl) SetupVeth(cfg *Net, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
+func (v *vetherImpl) SetupVeth(cfg *config.CNI, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
 	return nil, nil, nil
 }
 

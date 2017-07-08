@@ -9,7 +9,8 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
-	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
 // ErrEmptyPool is returned if the IP pool is configured with 0 IPs, e.g no
@@ -18,7 +19,7 @@ var ErrEmptyPool = errors.New("No free private IPs found on interface")
 
 // IPAllocator is the implementation of the actual allocator
 type ipAllocator struct {
-	conf   *Net
+	conf   *config.CNI
 	store  *disk.Store
 	eniMap vpcnetstate.ENIs
 }

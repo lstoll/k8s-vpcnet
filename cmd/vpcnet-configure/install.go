@@ -6,25 +6,15 @@ import (
 	"os"
 	"path/filepath"
 
+	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
 )
 
-const cniJSON = `{
-   "cniVersion": "0.3.1",
-   "name": "vpcnet",
-   "type": "vpcnet",
-   "log_verbosity": 2,
-   "ip_masq": true
- }`
-
-func installCNI() error {
+func installCNI(cfg *config.Config) error {
 	err := os.MkdirAll("/opt/cni/bin", 0755)
 	if err != nil {
 		return errors.Wrap(err, "Error creating /opt/cni/bin/")
-	}
-	err = os.MkdirAll("/etc/cni/net.d", 0755)
-	if err != nil {
-		return errors.Wrap(err, "Error creating /etc/cni/net.d")
 	}
 	// copy bins
 	for _, f := range []string{"vpcnet", "loopback"} {
@@ -34,9 +24,9 @@ func installCNI() error {
 		}
 	}
 
-	err = ioutil.WriteFile("/etc/cni/net.d/10-vpcnet.conf", []byte(cniJSON), 0644)
+	err = cniconfig.WriteCNIConfig(cfg)
 	if err != nil {
-		return errors.Wrap(err, "Error writing CNI configuration JSON")
+		return errors.Wrap(err, "Error writing CNI configuration.")
 	}
 
 	return nil

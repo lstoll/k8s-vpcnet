@@ -16,29 +16,9 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
-	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
-
-var defaultVether vether = &vetherImpl{}
-
-// Net is the top level data passed in
-type Net struct {
-	Name       string `json:"name"`
-	CNIVersion string `json:"cniVersion"`
-	// Type is the type of interface plugin in use
-	Type string `json:"type"`
-
-	// ENIMapPath is the optional path to read the map from. Otherwise, use default
-	ENIMapPath string `json:"eni_map_path"`
-	//DataDir overrides the dir that the plugin will track state in
-	DataDir string `json:"data_dir"`
-
-	// IPMasq will write outbound masquerate iptables rules
-	IPMasq bool `json:"ip_masq"`
-
-	// LogLevel is the glog v flag to set
-	LogVerbosity int `json:"log_verbosity"`
-}
 
 type podNet struct {
 	// ContainerIP is the IP to allocate to the container
@@ -53,11 +33,18 @@ type podNet struct {
 	ENI *vpcnetstate.ENI
 }
 
-func main() {
-	skel.PluginMain(cmdAdd, cmdDel, version.All)
+type cniRunner struct {
+	vether vether
 }
 
-func cmdAdd(args *skel.CmdArgs) error {
+func main() {
+	r := &cniRunner{
+		vether: &vetherImpl{},
+	}
+	skel.PluginMain(r.cmdAdd, r.cmdDel, version.All)
+}
+
+func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 	conf, em, err := loadConfig(args.StdinData)
 	if err != nil {
 		return err
@@ -91,7 +78,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		args.Netns,
 	)
 
-	hostIf, containerIf, err := defaultVether.SetupVeth(conf, args.Netns, args.IfName, alloced)
+	hostIf, containerIf, err := c.vether.SetupVeth(conf, args.Netns, args.IfName, alloced)
 	if err != nil {
 		return err
 	}
@@ -134,7 +121,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	return nil
 }
 
-func cmdDel(args *skel.CmdArgs) error {
+func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	conf, _, err := loadConfig(args.StdinData)
 	if err != nil {
 		return err
@@ -160,7 +147,7 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	if args.Netns != "" {
-		defaultVether.TeardownVeth(args.Netns, args.IfName)
+		c.vether.TeardownVeth(args.Netns, args.IfName)
 	} else {
 		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
 	}
@@ -170,13 +157,13 @@ func cmdDel(args *skel.CmdArgs) error {
 	return nil
 }
 
-func loadConfig(dat []byte) (*Net, vpcnetstate.ENIs, error) {
-	n := &Net{}
-	err := json.Unmarshal(dat, n)
+func loadConfig(dat []byte) (*config.CNI, vpcnetstate.ENIs, error) {
+	cfg := &config.CNI{}
+	err := json.Unmarshal(dat, cfg)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "Error unmarshaling Net")
 	}
-	mp := n.ENIMapPath
+	mp := cfg.ENIMapPath
 	if mp == "" {
 		mp = vpcnetstate.DefaultENIMapPath
 	}
@@ -185,10 +172,10 @@ func loadConfig(dat []byte) (*Net, vpcnetstate.ENIs, error) {
 		return nil, nil, errors.Wrap(err, "Error loading ENI configuration")
 	}
 
-	return n, em, nil
+	return cfg, em, nil
 }
 
-func initGlog(cfg *Net) {
+func initGlog(cfg *config.CNI) {
 	flag.Set("logtostderr", "true")
 	flag.Set("v", strconv.Itoa(cfg.LogVerbosity))
 	flag.Parse()

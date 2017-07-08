@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
-	"github.com/lstoll/k8s-vpcnet/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
