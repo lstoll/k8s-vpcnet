@@ -8,8 +8,8 @@ import (
 
 	"github.com/pkg/errors"
 
-	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
@@ -20,7 +20,7 @@ var ErrEmptyPool = errors.New("No free private IPs found on interface")
 // IPAllocator is the implementation of the actual allocator
 type ipAllocator struct {
 	conf   *config.CNI
-	store  *disk.Store
+	store  *diskstore.Store
 	eniMap vpcnetstate.ENIs
 }
 
@@ -87,16 +87,17 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	}, nil
 }
 
-// Release releases all IPs allocated for the container with given ID.
-func (a *ipAllocator) Release(id string) error {
+// Release releases all IPs allocated for the container with given ID, and
+// returns the released addresses.
+func (a *ipAllocator) Release(id string) ([]net.IP, error) {
 	a.store.Lock()
 	defer a.store.Unlock()
 
-	err := a.store.ReleaseByID(id)
+	r, err := a.store.ReleaseByID(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return r, nil
 }
 
 // Classic Golang

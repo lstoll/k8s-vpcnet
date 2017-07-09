@@ -168,7 +168,24 @@ func TestVeth(t *testing.T) {
 			}
 
 			err = hostNS.Do(func(ns.NetNS) error {
-				return v.TeardownVeth(contNS.Path(), "eth0")
+				err := v.TeardownVeth(&config.CNI{IPMasq: tc.Masq}, contNS.Path(), "eth0", []net.IP{pn.ContainerIP})
+				if err != nil {
+					t.Fatalf("Error tearing down veth [%+v]", err)
+				}
+
+				routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
+				if err != nil {
+					t.Fatalf("Error fetching host NS routes [%+v]", err)
+				}
+				t.Logf("routes: %+v", routes)
+
+				rules, err := netlink.RuleList(netlink.FAMILY_ALL)
+				if err != nil {
+					t.Fatalf("Error fetching host NS rules [%+v]", err)
+				}
+				t.Logf("rules: %+v", rules)
+
+				return nil
 			})
 			if err != nil {
 				t.Fatalf("Error tearing down veth [%v]")
