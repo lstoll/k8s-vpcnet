@@ -1,0 +1,17 @@
+{
+  "Exclude": [
+    "should have comment.*or be unexported",
+    "\\.gen\\.go",
+    "\\.pb\\.go",
+    "^vendor\/",
+    "error return value not checked.*defer"
+  ],
+  "Enable": [
+    "errcheck",
+    "vet",
+    "golint",
+    "deadcode",
+    "goconst",
+    "staticcheck"
+  ]
+}
