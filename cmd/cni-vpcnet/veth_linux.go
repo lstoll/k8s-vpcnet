@@ -285,8 +285,8 @@ func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, 
 	return nil
 }
 
-func (v *vetherImpl) TeardownVeth(nspath, ifname string) error {
-	return ns.WithNetNSPath(nspath, func(_ ns.NetNS) error {
+func (v *vetherImpl) TeardownVeth(cfg *config.CNI, nspath, ifname string, released []net.IP) error {
+	err := ns.WithNetNSPath(nspath, func(_ ns.NetNS) error {
 		var err error
 		_, err = ip.DelLinkByNameAddr(ifname, netlink.FAMILY_V4)
 		if err != nil && err == ip.ErrLinkNotFound {
@@ -294,10 +294,48 @@ func (v *vetherImpl) TeardownVeth(nspath, ifname string) error {
 		}
 		return err
 	})
+	if err != nil {
+		return errors.Wrapf(err, "Error tearing down veth for namespace %s", nspath)
+	}
 
 	// TODO - clean up the route/rule entries To do this properly, we'll
 	// probably need to persist ENI information in a way we can load by
 	// container id/ns and use here
+	for _, ip := range released {
+		routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
+		if err != nil {
+			return errors.Wrap(err, "Error fetching routes")
+		}
+		for _, route := range routes {
+			glog.V(4).Infof("NS %s IP %s: Checking route %+v", nspath, ip.String(), route)
+			if (route.Src != nil && route.Src.Equal(ip)) ||
+				(route.Dst != nil && route.Dst.IP.Equal(ip) && route.Dst.Mask.String() == net.CIDRMask(32, 32).String()) {
+				glog.V(4).Infof("NS %s IP %s: Deleting route %+v", nspath, ip.String(), route)
+				err = netlink.RouteDel(&route)
+				if err != nil {
+					return errors.Wrapf(err, "Error deleting route %+v", route)
+				}
+			}
+		}
+
+		rules, err := netlink.RuleList(netlink.FAMILY_ALL)
+		if err != nil {
+			return errors.Wrap(err, "Error fetching rules")
+		}
+		for _, rule := range rules {
+			glog.V(4).Infof("NS %s IP %s: Checking rule %+v", nspath, ip.String(), rule)
+			if (rule.Src != nil && rule.Src.IP.Equal(ip) && rule.Src.Mask.String() == net.CIDRMask(32, 32).String()) ||
+				(rule.Dst != nil && rule.Dst.IP.Equal(ip) && rule.Dst.Mask.String() == net.CIDRMask(32, 32).String()) {
+				glog.V(4).Infof("NS %s IP %s: Deleting rule %+v", nspath, ip.String(), rule)
+				err = netlink.RuleDel(&rule)
+				if err != nil {
+					return errors.Wrapf(err, "Error deleting rule %+v", rule)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // ensureTables ensures that the route table names are written to

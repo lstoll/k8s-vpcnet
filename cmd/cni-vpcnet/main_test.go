@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"path"
 	"testing"
@@ -38,7 +39,7 @@ func (v *testVether) SetupVeth(cfg *config.CNI, contnsPath, ifName string, net *
 	return v.hostIf, v.contIf, v.setupErr
 }
 
-func (v *testVether) TeardownVeth(netns, ifname string) error {
+func (v *testVether) TeardownVeth(cfg *config.CNI, nspath, ifname string, released []net.IP) error {
 	return v.teardownError
 }
 

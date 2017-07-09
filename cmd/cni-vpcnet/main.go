@@ -6,7 +6,6 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend/disk"
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/ipmasq"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
@@ -52,7 +52,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 	initGlog(conf)
 	defer glog.Flush()
 
-	store, err := disk.New(conf.Name, conf.DataDir)
+	store, err := diskstore.New(conf.Name, conf.DataDir)
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 
 	alloced, err := alloc.Get(args.ContainerID)
 	if err != nil {
+		glog.Errorf("Error allocating IP address for container %s [%+v]", args.ContainerID, err)
 		return err
 	}
 
@@ -79,6 +80,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 
 	hostIf, containerIf, err := c.vether.SetupVeth(conf, args.Netns, args.IfName, alloced)
 	if err != nil {
+		glog.Errorf("Error setting up interface for container %s [%+v]", args.ContainerID, err)
 		return err
 	}
 
@@ -108,6 +110,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 			[]*net.IPNet{conf.ClusterCIDR, conf.ServiceCIDR},
 		)
 		if err != nil {
+			glog.Errorf("Error inserting IPTables rule for container %s [%+v]", args.ContainerID, err)
 			return errors.Wrap(err, "Error inserting IPTables rule")
 		}
 	}
@@ -129,7 +132,7 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	initGlog(conf)
 	defer glog.Flush()
 
-	store, err := disk.New(conf.Name, conf.DataDir)
+	store, err := diskstore.New(conf.Name, conf.DataDir)
 	if err != nil {
 		return err
 	}
@@ -140,13 +143,14 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 		store: store,
 	}
 
-	err = alloc.Release(args.ContainerID)
+	released, err := alloc.Release(args.ContainerID)
 	if err != nil {
+		glog.Errorf("Error releasing IP address for container %s [%+v]", args.ContainerID, err)
 		return errors.Wrap(err, "Error releasing IP")
 	}
 
 	if args.Netns != "" {
-		c.vether.TeardownVeth(args.Netns, args.IfName)
+		c.vether.TeardownVeth(conf, args.Netns, args.IfName, released)
 	} else {
 		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
 	}
@@ -154,6 +158,7 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	if conf.IPMasq {
 		err := ipmasq.Teardown(conf.Name, args.ContainerID)
 		if err != nil {
+			glog.Errorf("Error tearing down interface for %s [%+v]", args.ContainerID, err)
 			return errors.Wrap(err, "Error tearing down iptables rules")
 		}
 	}

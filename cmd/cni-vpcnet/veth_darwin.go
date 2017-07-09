@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net"
+
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 )
@@ -11,6 +13,6 @@ func (v *vetherImpl) SetupVeth(cfg *config.CNI, contnsPath, ifName string, net *
 	return nil, nil, nil
 }
 
-func (v *vetherImpl) TeardownVeth(netns, ifname string) error {
+func (v *vetherImpl) TeardownVeth(cfg *config.CNI, nspath, ifname string, released []net.IP) error {
 	return nil
 }

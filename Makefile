@@ -1,4 +1,4 @@
-.PHONY: all build containers release test cni-bundle
+.PHONY: all build containers release test lint
 
 ifdef TRAVIS_COMMIT
 VERSION := $(shell git rev-parse --short HEAD)
@@ -22,6 +22,9 @@ build:
 
 test:
 	go test -v $$(go list ./... | grep -v /vendor/)
+
+lint:
+	GOOS=linux GOARCH=amd64 gometalinter --config=.gometalinter.cfg.json --deadline=1200s ./...
 
 vethtest:
 	sudo go test -v ./cmd/cni-vpcnet/ -vethtests
