@@ -18,10 +18,9 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/containernetworking/plugins/plugins/ipam/host-local/backend"
 )
 
 const lastIPFilePrefix = "last_reserved_ip."
@@ -34,9 +33,6 @@ type Store struct {
 	FileLock
 	dataDir string
 }
-
-// Store implements the Store interface
-var _ backend.Store = &Store{}
 
 func New(network, dataDir string) (*Store, error) {
 	if dataDir == "" {
@@ -95,23 +91,25 @@ func (s *Store) Release(ip net.IP) error {
 	return os.Remove(filepath.Join(s.dataDir, ip.String()))
 }
 
-// N.B. This function eats errors to be tolerant and
-// release as much as possible
-func (s *Store) ReleaseByID(id string) error {
-	err := filepath.Walk(s.dataDir, func(path string, info os.FileInfo, err error) error {
+// ReleaseByID will release all addresses for this ID, and return them. N.B.
+// This function eats errors to be tolerant and release as much as possible.
+func (s *Store) ReleaseByID(id string) ([]net.IP, error) {
+	released := []net.IP{}
+	err := filepath.Walk(s.dataDir, func(fp string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		data, err := ioutil.ReadFile(path)
+		data, err := ioutil.ReadFile(fp)
 		if err != nil {
 			return nil
 		}
 		if strings.TrimSpace(string(data)) == strings.TrimSpace(id) {
-			if err := os.Remove(path); err != nil {
+			released = append(released, net.ParseIP(path.Base(fp)))
+			if err := os.Remove(fp); err != nil {
 				return nil
 			}
 		}
 		return nil
 	})
-	return err
+	return released, err
 }
