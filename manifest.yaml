@@ -20,7 +20,7 @@ data:
     [logging]
     # The verbosity level for CNI plugin. Higher to begin with, to make sure we
     # have diagnostic info
-    cni_v_level = 2
+    cni_v_level = 4
 ---
 apiVersion: extensions/v1beta1
 kind: Deployment

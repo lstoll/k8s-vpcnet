@@ -66,7 +66,8 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 
 	alloced, err := alloc.Get(args.ContainerID)
 	if err != nil {
-		return err
+		glog.Errorf("Error allocating address for Container ID %q [%+v]", args.ContainerID, err)
+		return errors.Wrapf(err, "Error allocating address for Container ID %q", args.ContainerID)
 	}
 
 	glog.V(2).Infof(
@@ -79,6 +80,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 
 	hostIf, containerIf, err := c.vether.SetupVeth(conf, args.Netns, args.IfName, alloced)
 	if err != nil {
+		glog.Errorf("Error configururing veth link for ContainerID %q [%+v]", args.ContainerID, err)
 		return err
 	}
 
@@ -108,7 +110,8 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 			[]*net.IPNet{conf.ClusterCIDR, conf.ServiceCIDR},
 		)
 		if err != nil {
-			return errors.Wrap(err, "Error inserting IPTables rule")
+			glog.Errorf("Error inserting IPTables rule for ContainerID %q [%+v]", args.ContainerID, err)
+			return errors.Wrapf(err, "Error inserting IPTables rule for Container ID %q", args.ContainerID)
 		}
 	}
 

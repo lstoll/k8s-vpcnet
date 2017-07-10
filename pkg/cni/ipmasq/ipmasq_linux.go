@@ -20,8 +20,10 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/golang/glog"
 	"github.com/mgutz/str"
 	"github.com/pkg/errors"
 )
@@ -52,14 +54,14 @@ func Setup(pluginName, podID string, podIP net.IP, skipNets []*net.IPNet) error 
 		multicastNet = "224.0.0.0/4"
 	}
 	if err != nil {
-		return fmt.Errorf("failed to locate iptables: %v", err)
+		return errors.Wrap(err, "Failed to locate iptables")
 	}
 
 	// Create chain if doesn't exist
 	exists := false
 	chains, err := ipt.ListChains("nat")
 	if err != nil {
-		return fmt.Errorf("failed to list chains: %v", err)
+		return errors.Wrap(err, "Failed to list chains")
 	}
 	for _, ch := range chains {
 		if ch == chain {
@@ -68,25 +70,41 @@ func Setup(pluginName, podID string, podIP net.IP, skipNets []*net.IPNet) error 
 		}
 	}
 	if !exists {
+		glog.V(4).Infof("Creating chain %q for podID %q", chain, podID)
 		if err = ipt.NewChain("nat", chain); err != nil {
-			return err
+			return errors.Wrapf(err, "Failed to create chain %q", chain)
 		}
 	}
 
 	// Packets to these network should not be touched
 	for _, sn := range skipNets {
-		if err := ipt.AppendUnique("nat", chain, "-d", sn.String(), "-j", "ACCEPT", "-m", "comment", "--comment", comment); err != nil {
-			return err
+		err = retry(100, 1*time.Millisecond, []string{"No chain/target/match by that name."}, func() error {
+			glog.V(4).Infof("Adding skip rule %v for podID %q", sn, podID)
+			return ipt.AppendUnique("nat", chain, "-d", sn.String(), "-j", "ACCEPT", "-m", "comment", "--comment", comment)
+		})
+		if err != nil {
+			return errors.Wrapf(err, "Error appending skip rule for %v to (pre-existing? %t) chain %q", sn, exists, chain)
 		}
 	}
 
 	// Don't masquerade multicast - pods should be able to talk to other pods
 	// on the local network via multicast.
-	if err := ipt.AppendUnique("nat", chain, "!", "-d", multicastNet, "-j", "MASQUERADE", "-m", "comment", "--comment", comment); err != nil {
-		return err
+	err = retry(100, 1*time.Millisecond, []string{"No chain/target/match by that name."}, func() error {
+		glog.V(4).Infof("Adding skip multicast rule for podID %q", podID)
+		return ipt.AppendUnique("nat", chain, "!", "-d", multicastNet, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+	})
+	if err != nil {
+		return errors.Wrapf(err, "Error appending skip for multicast net to (pre-existing? %t) chain %q", exists, err)
 	}
 
-	return ipt.AppendUnique("nat", "POSTROUTING", "-s", podIP.String()+"/32", "-j", chain, "-m", "comment", "--comment", comment)
+	err = retry(100, 1*time.Millisecond, []string{"No such file or directory"}, func() error {
+		glog.V(4).Infof("Adding masquerade rule for podID %q IP %v", podID, podIP.String())
+		return ipt.AppendUnique("nat", "POSTROUTING", "-s", podIP.String()+"/32", "-j", chain, "-m", "comment", "--comment", comment)
+	})
+	if err != nil {
+		return errors.Wrapf(err, "Error appending masquerade rule for pod IP %v to (pre-existing? %t) chain %q", podIP.String(), exists, chain)
+	}
+	return nil
 }
 
 // Teardown undoes the effects of SetupIPMasq
@@ -96,17 +114,18 @@ func Teardown(pluginName, podID string) error {
 
 	ipt, err := iptables.New()
 	if err != nil {
-		return fmt.Errorf("failed to locate iptables: %v", err)
+		return errors.Wrap(err, "failed to locate iptables")
 	}
 	if err != nil {
-		return fmt.Errorf("failed to locate iptables: %v", err)
+		return errors.Wrap(err, "failed to locate iptables")
 	}
 
 	rules, err := ipt.List("nat", "POSTROUTING")
 	if err != nil {
-		return errors.Wrap(err, "failed to list rules in nat POSTROUTING")
+		return errors.Wrapf(err, "failed to list rules in nat POSTROUTING for chain %q", chain)
 	}
 	for _, r := range rules {
+		glog.V(4).Infof("Deleting rule %v for podID %q", r, podID)
 		if strings.Contains(r, fmt.Sprintf("--comment %q", comment)) {
 			// Break it down in to individual items, dropping the -A and chain
 			// TODO - could this be less fragile?
@@ -114,15 +133,17 @@ func Teardown(pluginName, podID string) error {
 			log.Printf("Would delete %s", dr)
 			err := ipt.Delete("nat", "POSTROUTING", dr...)
 			if err != nil {
-				return errors.Wrapf(err, "Error deleting %s from nat POSTROUTING", r)
+				return errors.Wrapf(err, "Error deleting %s from nat POSTROUTING chain %q", r, chain)
 			}
 		}
 	}
 
+	glog.V(4).Infof("Clearing chain %q for podID %q", chain, podID)
 	if err = ipt.ClearChain("nat", chain); err != nil {
 		return errors.Wrapf(err, "Error clearing chain %q from nat table", chain)
 	}
 
+	glog.V(4).Infof("Deleting chain %q for podID %q", chain, podID)
 	if err = ipt.DeleteChain("nat", chain); err != nil {
 		return errors.Wrapf(err, "Error deleting chain %q from nat table", chain)
 	}
@@ -143,4 +164,29 @@ func formatChainName(name string, id string) string {
 // rule identification within iptables.
 func formatComment(name string, id string) string {
 	return fmt.Sprintf("%s/%s", name, id)
+}
+
+func retry(attempts int, delay time.Duration, acceptErrContains []string, fn func() error) error {
+	retries := 0
+	for {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+
+		retryable := false
+		for _, s := range acceptErrContains {
+			if strings.Contains(err.Error(), s) {
+				retryable = true
+			}
+		}
+		if !retryable {
+			return err
+		}
+		if retries > attempts {
+			return err
+		}
+		time.Sleep(delay)
+		retries++
+	}
 }
