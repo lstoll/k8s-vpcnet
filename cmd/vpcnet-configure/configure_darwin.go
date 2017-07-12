@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 )
 
 func configureInterface(name string, mac string, ip *net.IPNet, subnet *net.IPNet) error {
@@ -14,4 +15,12 @@ func configureInterface(name string, mac string, ip *net.IPNet, subnet *net.IPNe
 func interfaceExists(name string) (bool, error) {
 	glog.Infof("no-op add of interfaceExists %q", name)
 	return true, nil
+}
+
+func configureIPMasq(cfg *config.Network, ips []net.IP) error {
+	return nil
+}
+
+func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet) error {
+	return nil
 }

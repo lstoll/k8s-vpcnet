@@ -125,19 +125,19 @@ func TestVeth(t *testing.T) {
 				}
 				t.Logf("Host NS ip rules:\n%s\n", stdoutStderr)
 
-				cmd = exec.Command("ip", "route", "show", "table", "frompod-eni1")
-				stdoutStderr, err = cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
-				}
-				t.Logf("Host NS frompod table:\n%s\n", stdoutStderr)
+				// cmd = exec.Command("ip", "route", "show", "table", "frompod-eni1")
+				// stdoutStderr, err = cmd.CombinedOutput()
+				// if err != nil {
+				// 	t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
+				// }
+				// t.Logf("Host NS frompod table:\n%s\n", stdoutStderr)
 
-				cmd = exec.Command("ip", "route", "show", "table", "topod-eni1")
-				stdoutStderr, err = cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
-				}
-				t.Logf("Host NS topod table:\n%s\n", stdoutStderr)
+				// cmd = exec.Command("ip", "route", "show", "table", "topod-eni1")
+				// stdoutStderr, err = cmd.CombinedOutput()
+				// if err != nil {
+				// 	t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
+				// }
+				// t.Logf("Host NS topod table:\n%s\n", stdoutStderr)
 
 				err = testutils.Ping(pn.ENIIp.IP.String(), pn.ContainerIP.String(), false, 1)
 				if err != nil {

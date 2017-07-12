@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
 )
 
@@ -23,13 +25,20 @@ type ENIs []*ENI
 
 // ENI represents the configuration for a single ENI
 type ENI struct {
-	EniID       string   `json:"eni_id"`
-	Attached    bool     `json:"attached"`
-	InterfaceIP string   `json:"interface_ip"`
-	Index       int      `json:"index"`
-	CIDRBlock   string   `json:"cidr_block"`
-	IPs         []string `json:"ips"`
-	MACAddress  string   `json:"mac_address"`
+	// EniID is the ID that AWS assigns for this interface
+	EniID string `json:"eni_id"`
+	// Attached indicates if it's attached to an interface
+	Attached bool `json:"attached"`
+	// InterfaceIP is the main IP address for the interface
+	InterfaceIP net.IP `json:"interface_ip"`
+	// Index is the attachment index on the instance
+	Index int `json:"index"`
+	// CIDRBlock is the subnet this interface is attached to
+	CIDRBlock *config.IPNet `json:"cidr_block"`
+	// IPs are the additional IP addresses assigned to the interface
+	IPs []net.IP `json:"ips"`
+	// MACAddress is the hardware MAC address for this interface
+	MACAddress string `json:"mac_address"`
 }
 
 // InterfaceName returns the name this ENI should have on the host

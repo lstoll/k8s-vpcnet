@@ -166,6 +166,8 @@ spec:
               name: cni-bin
             - mountPath: /etc/vpcnet
               name: config-volume
+            - mountPath: /etc/iproute2
+              name: etc-iproute2
       volumes:
         - name: cni-working
           hostPath:
@@ -176,6 +178,9 @@ spec:
         - name: cni-bin
           hostPath:
             path: /opt/cni/bin
+        - name: etc-iproute2
+          hostPath:
+            path: /etc/iproute2
         - name: config-volume
           configMap:
             name: vpcnet-configuration

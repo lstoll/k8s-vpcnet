@@ -2,34 +2,27 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"net"
-	"os"
-	"strings"
 
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ip"
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/golang/glog"
 	"github.com/j-keck/arping"
-	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
-)
-
-const (
-	fromPodRTBase = 120
-	toPodRTBase   = 160
 )
 
 // When should this not just be 9000?
 const mtu = 1500
 
 type vetherImpl struct {
-	cfg *config.CNI
+	cfg *cniconfig.CNI
 }
 
-func (v *vetherImpl) SetupVeth(cfg *config.CNI, netnsPath string, ifName string, podNet *podNet) (*current.Interface, *current.Interface, error) {
+func (v *vetherImpl) SetupVeth(cfg *cniconfig.CNI, netnsPath string, ifName string, podNet *podNet) (*current.Interface, *current.Interface, error) {
 	hostInterface := &current.Interface{}
 	containerInterface := &current.Interface{}
 
@@ -133,26 +126,7 @@ func (v *vetherImpl) SetupVeth(cfg *config.CNI, netnsPath string, ifName string,
 	}
 
 	// Set up the routing rules to ensure traffic egresses the correct host interface
-
-	// Fetch the ENI
-	hostENIIf, err := netlink.LinkByName(podNet.ENIInterface)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to lookup %q: %v", podNet.ENIInterface, err)
-	}
-
-	// Write entries so we can use ip rule command easier
-	err = ensureTables(podNet.ENI.Index)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "Error writing rt_tables")
-	}
-
-	// Ensure we have the default out route for this eni's frompod table
-	err = ensureFromPodRoute(podNet.ENI.Index, hostENIIf.Attrs().Index, podNet.ENISubnet, cfg.ClusterCIDR, cfg.ServiceCIDR, cfg.IPMasq)
-	if err != nil {
-		return nil, nil, errors.Wrapf(err, "Error ensuring from pod default route exists for eni%d", podNet.ENI.Index)
-	}
-
-	for _, r := range podRoutes(podNet.ENI.Index, hostVeth.Attrs().Index, net.ParseIP(podNet.ENI.InterfaceIP), podNet.ContainerIP) {
+	for _, r := range podRoutes(podNet.ENI.Index, hostVeth.Attrs().Index, podNet.ENI.InterfaceIP, podNet.ContainerIP) {
 		if err := netlink.RouteAdd(r); err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to add rule %v", r)
 		}
@@ -181,7 +155,7 @@ func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.
 		},
 		// toPodRT should have link scope route to pod IP via pod
 		{
-			Table:     toPodRTBase + eniAttachIndex,
+			Table:     config.ToPodRTBase + eniAttachIndex,
 			LinkIndex: vethLinkIndex,
 			Dst:       &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)},
 			Scope:     netlink.SCOPE_LINK,
@@ -192,100 +166,21 @@ func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.
 func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) []*netlink.Rule {
 	// Traffic from anywhere to pod IP "iif" the host eni eth should jump to toPodRT
 	fromRule := netlink.NewRule()
-	fromRule.Table = toPodRTBase + eniAttachIndex
+	fromRule.Table = config.ToPodRTBase + eniAttachIndex
 	fromRule.IifName = eniName
 	fromRule.Src = &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
 	fromRule.Dst = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
 
 	// Traffic from pod IP iif the veth should jump to fromPodRT
 	toRule := netlink.NewRule()
-	toRule.Table = fromPodRTBase + eniAttachIndex
+	toRule.Table = config.FromPodRTBase + eniAttachIndex
 	toRule.IifName = vethName
 	toRule.Src = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
 
 	return []*netlink.Rule{fromRule, toRule}
 }
 
-func ensureFromPodRoute(eniAttachIndex, eniLinkIndex int, eniSubnet *net.IPNet, clusterCIDR *net.IPNet, serviceCIDR *net.IPNet, ipMasq bool) error {
-	// VPC gateway is first address in subnet
-	gw := net.ParseIP(eniSubnet.IP.String()).To4()
-	gw[3]++
-
-	var routes []*netlink.Route
-
-	// Set this regardless, we can treat internal service stuff as local
-	if serviceCIDR != nil {
-		routes = append(routes, &netlink.Route{
-			Table:     fromPodRTBase + eniAttachIndex,
-			LinkIndex: eniLinkIndex,
-			Dst:       serviceCIDR,
-			//Scope:     netlink.SCOPE_LINK, Direct all service traffic via the
-			// VPC gateway, it can figure stuff out.
-			Scope: netlink.SCOPE_UNIVERSE,
-			Gw:    gw,
-		})
-	}
-
-	// Route the greater cluster network via the ENI gateway
-	routes = append(routes, &netlink.Route{
-		Table:     fromPodRTBase + eniAttachIndex,
-		LinkIndex: eniLinkIndex,
-		Dst:       clusterCIDR,
-		Scope:     netlink.SCOPE_UNIVERSE,
-		Gw:        gw,
-	})
-
-	if ipMasq {
-		// If we're masquerading, we want non-local interface traffic to leave
-		// the main interface via it's default route, so it'll be masqeraded as
-		// the host. We need to make sure local traffic and service traffic is
-		// still pushed out the eni
-
-		// TODO - have this configured, or inferred smarter?
-		eth0, err := netlink.LinkByName("eth0")
-		if err != nil {
-			return errors.Wrap(err, "failed to lookup eth0")
-		}
-
-		routes = append(routes, &netlink.Route{
-			Table:     fromPodRTBase + eniAttachIndex,
-			LinkIndex: eniLinkIndex,
-			Dst:       eniSubnet,
-			Scope:     netlink.SCOPE_LINK,
-		})
-
-		routes = append(routes, &netlink.Route{
-			Table:     fromPodRTBase + eniAttachIndex,
-			LinkIndex: eth0.Attrs().Index,
-			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        gw, // TODO - what happens eth0 is on another subnet?
-		})
-
-	} else {
-		routes = append(routes, &netlink.Route{
-			Table:     fromPodRTBase + eniAttachIndex,
-			LinkIndex: eniLinkIndex,
-			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-			Scope:     netlink.SCOPE_UNIVERSE,
-			Gw:        gw,
-		})
-
-	}
-
-	// fromPodRT should default route from via the ENI interface
-	for _, r := range routes {
-		err := netlink.RouteAdd(r)
-		if err != nil {
-			if !strings.HasSuffix(err.Error(), "file exists") { // ignore dupes
-				return errors.Wrapf(err, "Error ensuring outbound route %v for ENI %d", r, eniAttachIndex)
-			}
-		}
-	}
-	return nil
-}
-
-func (v *vetherImpl) TeardownVeth(cfg *config.CNI, nspath, ifname string, released []net.IP) error {
+func (v *vetherImpl) TeardownVeth(cfg *cniconfig.CNI, nspath, ifname string, released []net.IP) error {
 	err := ns.WithNetNSPath(nspath, func(_ ns.NetNS) error {
 		var err error
 		_, err = ip.DelLinkByNameAddr(ifname, netlink.FAMILY_V4)
@@ -335,33 +230,5 @@ func (v *vetherImpl) TeardownVeth(cfg *config.CNI, nspath, ifname string, releas
 		}
 	}
 
-	return nil
-}
-
-// ensureTables ensures that the route table names are written to
-// /etc/iproute2/rt_tables. We don't need this, but it makes visibility on the
-// host easier.
-func ensureTables(eniAttachIndex int) error {
-	curr, err := ioutil.ReadFile("/etc/iproute2/rt_tables")
-	if err != nil {
-		return errors.Wrap(err, "Error reading route table file")
-	}
-	for _, l := range []string{
-		fmt.Sprintf("%d frompod-eni%d", fromPodRTBase+eniAttachIndex, eniAttachIndex),
-		fmt.Sprintf("%d topod-eni%d", toPodRTBase+eniAttachIndex, eniAttachIndex),
-	} {
-		if !strings.Contains(string(curr), l+"\n") {
-			f, err := os.OpenFile("/etc/iproute2/rt_tables", os.O_RDWR|os.O_APPEND, 0640)
-			if err != nil {
-				return errors.Wrap(err, "error opening rt file for append")
-			}
-			_, err = fmt.Fprintln(f, l+"\n")
-			if err != nil {
-				f.Close()
-				return errors.Wrapf(err, "error writing %q to rt file", l)
-			}
-			_ = f.Close()
-		}
-	}
 	return nil
 }

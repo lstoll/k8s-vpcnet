@@ -3,12 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
@@ -223,18 +225,22 @@ func (c *Controller) createENI(node *v1.Node) (*vpcnetstate.ENI, error) {
 		return nil, err
 	}
 
-	ips := []string{}
+	ips := []net.IP{}
 	for _, ip := range ceniResp.NetworkInterface.PrivateIpAddresses {
 		if *ip.PrivateIpAddress != *ceniResp.NetworkInterface.PrivateIpAddress {
-			ips = append(ips, *ip.PrivateIpAddress)
+			ips = append(ips, net.ParseIP(*ip.PrivateIpAddress))
 		}
 	}
 
+	_, cb, err := net.ParseCIDR(*subResp.Subnets[0].CidrBlock)
+	if err != nil {
+		return nil, errors.Wrapf(err, "Error getting ipnet from %q", *subResp.Subnets[0].CidrBlock)
+	}
 	return &vpcnetstate.ENI{
 		EniID:       *ceniResp.NetworkInterface.NetworkInterfaceId,
 		Attached:    false,
-		InterfaceIP: *ceniResp.NetworkInterface.PrivateIpAddress,
-		CIDRBlock:   *subResp.Subnets[0].CidrBlock,
+		InterfaceIP: net.ParseIP(*ceniResp.NetworkInterface.PrivateIpAddress),
+		CIDRBlock:   (*config.IPNet)(cb),
 		IPs:         ips,
 		MACAddress:  *ceniResp.NetworkInterface.MacAddress,
 	}, nil

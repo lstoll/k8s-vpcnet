@@ -66,7 +66,7 @@ func main() {
 			log.Fatalf("Error installing CNI deps [%v]", err)
 		}
 		glog.Info("Running node configurator in on-cluster mode")
-		runk8s()
+		runk8s(cfg)
 		// TODO Poll for current running pods, delete lock files for gone pods.
 		// Should we just loop http://localhost:10255/pods/  ({"kind":"PodList"})
 	case "manual":
@@ -91,7 +91,7 @@ func main() {
 	}
 }
 
-func runk8s() {
+func runk8s(vpcnetConfig *config.Config) {
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -146,11 +146,12 @@ func runk8s() {
 	}
 
 	c := &controller{
-		indexer:     indexer,
-		queue:       queue,
-		informer:    informer,
-		instanceID:  iid,
-		nodesClient: nodesClient,
+		indexer:      indexer,
+		queue:        queue,
+		informer:     informer,
+		instanceID:   iid,
+		nodesClient:  nodesClient,
+		vpcnetConfig: vpcnetConfig,
 	}
 
 	// Now let's start the controller
@@ -163,11 +164,12 @@ func runk8s() {
 }
 
 type controller struct {
-	indexer     cache.Indexer
-	queue       workqueue.RateLimitingInterface
-	informer    cache.Controller
-	nodesClient client_v1.NodeInterface
-	instanceID  string
+	indexer      cache.Indexer
+	queue        workqueue.RateLimitingInterface
+	informer     cache.Controller
+	nodesClient  client_v1.NodeInterface
+	instanceID   string
+	vpcnetConfig *config.Config
 }
 
 func (c *controller) handleNode(key string) error {
@@ -211,18 +213,34 @@ func (c *controller) handleNode(key string) error {
 			}
 			if !exists {
 				glog.V(2).Infof("Node %s interface %s not configured, creating interface", node.Name, config.EniID)
-				_, subnet, err := net.ParseCIDR(config.CIDRBlock)
-				if err != nil {
-					return errors.Wrap(err, "Error parsing subnet cidr")
-				}
 				ipn := &net.IPNet{
-					IP:   net.ParseIP(config.InterfaceIP),
-					Mask: subnet.Mask,
+					IP:   config.InterfaceIP,
+					Mask: config.CIDRBlock.Mask,
 				}
-				err = configureInterface(config.InterfaceName(), config.MACAddress, ipn, subnet)
+				err = configureInterface(config.InterfaceName(), config.MACAddress, ipn, config.CIDRBlock.IPNet())
 				if err != nil {
-					glog.Errorf("Error configuring interface %d on node %s", config.InterfaceName(), node.Name)
+					glog.Errorf("Error configuring interface %s on node %s [%+v]", config.InterfaceName(), node.Name, err)
 					return err
+				}
+
+				err = configureRoutes(
+					c.vpcnetConfig.Network,
+					config.InterfaceName(),
+					config.Index,
+					config.CIDRBlock.IPNet(),
+				)
+				if err != nil {
+					glog.Errorf("Error configuring routes for interface %s on node %s [%+v]", config.InterfaceName(), node.Name, err)
+					return errors.Wrapf(err, "Error configuring routes for interface %s on node %s", config.InterfaceName(), node.Name)
+				}
+
+				err = configureIPMasq(
+					c.vpcnetConfig.Network,
+					config.IPs,
+				)
+				if err != nil {
+					glog.Errorf("Error configuring ipmasq for interface %s on node %s [%+v]", config.InterfaceName(), node.Name, err)
+					return errors.Wrapf(err, "Error configuring ipmasq for interface %s on node %s", config.InterfaceName(), node.Name)
 				}
 			}
 			configedENIs = append(configedENIs, config)

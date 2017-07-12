@@ -15,7 +15,6 @@ import (
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
-	"github.com/lstoll/k8s-vpcnet/pkg/cni/ipmasq"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
@@ -101,20 +100,6 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 		},
 	}
 
-	if conf.IPMasq {
-		err := ipmasq.Setup(
-			conf.Name,
-			args.ContainerID,
-			alloced.ContainerIP,
-			// Don't masq our traffic, or (service traffic? or does service traffic need to masq from a diff IP?)
-			[]*net.IPNet{conf.ClusterCIDR, conf.ServiceCIDR},
-		)
-		if err != nil {
-			glog.Errorf("Error inserting IPTables rule for container %s [%+v]", args.ContainerID, err)
-			return errors.Wrap(err, "Error inserting IPTables rule")
-		}
-	}
-
 	err = types.PrintResult(result, version.Current())
 	if err != nil {
 		return errors.Wrap(err, "Error printing result")
@@ -153,14 +138,6 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 		c.vether.TeardownVeth(conf, args.Netns, args.IfName, released)
 	} else {
 		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
-	}
-
-	if conf.IPMasq {
-		err := ipmasq.Teardown(conf.Name, args.ContainerID)
-		if err != nil {
-			glog.Errorf("Error tearing down interface for %s [%+v]", args.ContainerID, err)
-			return errors.Wrap(err, "Error tearing down iptables rules")
-		}
 	}
 
 	return nil
