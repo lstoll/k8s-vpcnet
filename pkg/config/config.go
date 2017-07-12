@@ -29,6 +29,15 @@ func (n *IPNet) UnmarshalText(text []byte) error {
 	return nil
 }
 
+// UnmarshalText will unmarshal this IPNet from CIDR text notation
+func (n *IPNet) MarshalText() ([]byte, error) {
+	if n == nil {
+		return nil, nil
+	}
+	ipn := net.IPNet(*n)
+	return []byte(ipn.String()), nil
+}
+
 // IPNet returns self as a *net.IPNet
 func (n *IPNet) IPNet() *net.IPNet {
 	if n == nil {
@@ -45,6 +54,15 @@ type Config struct {
 	// Logging is where the logging configuration ends up
 	Logging *Logging `toml:"logging"`
 }
+
+const (
+	// FromPodRTBase is the base number we use + attach index to number the from
+	// pod routing table
+	FromPodRTBase = 120
+	// ToPodRTBase is the base number we use + attach index to number the to
+	// pod routing table
+	ToPodRTBase = 160
+)
 
 // Network is the network topology related configuration for this cluster
 type Network struct {

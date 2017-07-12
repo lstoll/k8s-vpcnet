@@ -2,7 +2,8 @@ FROM alpine:latest
 
 RUN apk --no-cache add \
     ca-certificates \
-    tini
+    tini \
+    iptables
 
 ADD build/bin/vpcnet-configure /bin/
 ADD build/bin/vpcnet /cni/

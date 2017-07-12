@@ -12,7 +12,8 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
@@ -27,19 +28,23 @@ var testMap = vpcnetstate.ENIs{
 	&vpcnetstate.ENI{
 		EniID:       "eni-5d232b8d",
 		Attached:    true,
-		InterfaceIP: "10.0.8.96",
-		CIDRBlock:   "10.0.0.0/20",
+		InterfaceIP: net.ParseIP("10.0.8.96"),
+		CIDRBlock:   &config.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(20, 32)},
 		Index:       1,
-		IPs:         []string{"10.0.10.32", "10.0.15.243", "10.0.15.36"},
-		MACAddress:  "0a:3e:1f:4e:c6:d2",
+		IPs: []net.IP{
+			net.ParseIP("10.0.10.32"),
+			net.ParseIP("10.0.15.243"),
+			net.ParseIP("10.0.15.36"),
+		},
+		MACAddress: "0a:3e:1f:4e:c6:d2",
 	},
 }
 
-func (v *testVether) SetupVeth(cfg *config.CNI, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
+func (v *testVether) SetupVeth(cfg *cniconfig.CNI, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
 	return v.hostIf, v.contIf, v.setupErr
 }
 
-func (v *testVether) TeardownVeth(cfg *config.CNI, nspath, ifname string, released []net.IP) error {
+func (v *testVether) TeardownVeth(cfg *cniconfig.CNI, nspath, ifname string, released []net.IP) error {
 	return v.teardownError
 }
 

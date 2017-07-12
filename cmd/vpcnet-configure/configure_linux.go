@@ -2,9 +2,14 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"strings"
 
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/ipmasq"
+	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
@@ -51,16 +56,121 @@ func configureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IP
 	// TODO - drop any routes that are created automatically?
 
 	// Add a source route via this interface
-	err = netlink.RouteAdd(&netlink.Route{
+	/*err = netlink.RouteAdd(&netlink.Route{
 		LinkIndex: hostNLif.Attrs().Index,
 		Dst:       subnet,
 		Scope:     netlink.SCOPE_LINK,
 		Src:       ip.IP,
 	})
 	if err != nil {
-		return fmt.Errorf("Error adding source route to %s on interface %s", subnet.String(), ifname)
+		return glog.Wrapf(err, "Error adding source route to %s on interface %s", subnet.String(), ifname)
+	}*/
+
+	return nil
+}
+
+func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet) error {
+	link, err := netlink.LinkByName(ifName)
+	if err != nil {
+		return errors.Wrapf(err, "failed to lookup %q", ifName)
 	}
 
+	// Write entries so we can use ip rule command easier
+	err = ensureTables(ifName, awsEniAttachIndex)
+	if err != nil {
+		return errors.Wrap(err, "Error writing rt_tables")
+	}
+
+	// VPC gateway is first address in subnet
+	gw := net.ParseIP(eniSubnet.IP.String()).To4()
+	gw[3]++
+
+	var routes []*netlink.Route
+
+	// Set this regardless, we can treat internal service stuff as local
+	routes = append(routes, &netlink.Route{
+		Table:     config.FromPodRTBase + awsEniAttachIndex,
+		LinkIndex: link.Attrs().Index,
+		Dst:       cfg.ServiceCIDR.IPNet(),
+		//Scope:     netlink.SCOPE_LINK, Direct all service traffic via the
+		// VPC gateway, it can figure stuff out.
+		Scope: netlink.SCOPE_UNIVERSE,
+		Gw:    gw,
+	})
+
+	// Route the greater cluster network via the ENI gateway
+	routes = append(routes, &netlink.Route{
+		Table:     config.FromPodRTBase + awsEniAttachIndex,
+		LinkIndex: link.Attrs().Index,
+		Dst:       cfg.ClusterCIDR.IPNet(),
+		Scope:     netlink.SCOPE_UNIVERSE,
+		Gw:        gw,
+	})
+
+	if cfg.PodIPMasq {
+		// If we're masquerading, we want non-local interface traffic to leave
+		// the main interface via it's default route, so it'll be masqeraded as
+		// the host. We need to make sure local traffic and service traffic is
+		// still pushed out the eni
+
+		// TODO - have this configured, or inferred smarter?
+		eth0, err := netlink.LinkByName("eth0")
+		if err != nil {
+			return errors.Wrap(err, "failed to lookup eth0")
+		}
+
+		routes = append(routes, &netlink.Route{
+			Table:     config.FromPodRTBase + awsEniAttachIndex,
+			LinkIndex: link.Attrs().Index,
+			Dst:       eniSubnet,
+			Scope:     netlink.SCOPE_LINK,
+		})
+
+		routes = append(routes, &netlink.Route{
+			Table:     config.FromPodRTBase + awsEniAttachIndex,
+			LinkIndex: eth0.Attrs().Index,
+			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        gw, // TODO - what happens eth0 is on another subnet?
+		})
+
+	} else {
+		routes = append(routes, &netlink.Route{
+			Table:     config.FromPodRTBase + awsEniAttachIndex,
+			LinkIndex: link.Attrs().Index,
+			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+			Scope:     netlink.SCOPE_UNIVERSE,
+			Gw:        gw,
+		})
+
+	}
+
+	// fromPodRT should default route from via the ENI interface
+	for _, r := range routes {
+		err := netlink.RouteAdd(r)
+		if err != nil {
+			if !strings.HasSuffix(err.Error(), "file exists") { // ignore dupes
+				return errors.Wrapf(err, "Error ensuring outbound route %v for ENI %d", r, awsEniAttachIndex)
+			}
+		}
+	}
+	return nil
+}
+
+func configureIPMasq(cfg *config.Network, ips []net.IP) error {
+	if cfg.PodIPMasq {
+		err := ipmasq.Setup(
+			"K8S-VPCNET",
+			"k8s-vpcnet generated rules for masquerading outbound pod traffic",
+			ips,
+			// Don't masq our traffic, or (service traffic? or does service traffic need to masq from a diff IP?)
+			[]*net.IPNet{cfg.ClusterCIDR.IPNet(), cfg.ServiceCIDR.IPNet()},
+		)
+		if err != nil {
+			glog.Errorf("Error inserting IPTables rules [%+v]", err)
+			return errors.Wrap(err, "Error inserting IPTables rule")
+		}
+	}
 	return nil
 }
 
@@ -76,4 +186,32 @@ func interfaceExists(name string) (bool, error) {
 	}
 	glog.V(4).Infof("Interface %q not found in %v", name, ifs)
 	return false, nil
+}
+
+// ensureTables ensures that the route table names are written to
+// /etc/iproute2/rt_tables. We don't need this, but it makes visibility on the
+// host easier.
+func ensureTables(ifName string, eniAttachIndex int) error {
+	curr, err := ioutil.ReadFile("/etc/iproute2/rt_tables")
+	if err != nil {
+		return errors.Wrap(err, "Error reading route table file")
+	}
+	for _, l := range []string{
+		fmt.Sprintf("%d frompod-%s", config.FromPodRTBase+eniAttachIndex, ifName),
+		fmt.Sprintf("%d topod-%s", config.ToPodRTBase+eniAttachIndex, ifName),
+	} {
+		if !strings.Contains(string(curr), l+"\n") {
+			f, err := os.OpenFile("/etc/iproute2/rt_tables", os.O_RDWR|os.O_APPEND, 0640)
+			if err != nil {
+				return errors.Wrap(err, "error opening rt file for append")
+			}
+			_, err = fmt.Fprintln(f, l+"\n")
+			if err != nil {
+				f.Close()
+				return errors.Wrapf(err, "error writing %q to rt file", l)
+			}
+			_ = f.Close()
+		}
+	}
+	return nil
 }

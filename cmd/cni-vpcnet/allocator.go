@@ -35,10 +35,7 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	}
 	config := a.eniMap[0]
 
-	ips := []net.IP{}
-	for _, i := range config.IPs {
-		ips = append(ips, net.ParseIP(i))
-	}
+	ips := config.IPs
 
 	if len(ips) == 0 {
 		return nil, ErrEmptyPool
@@ -76,13 +73,11 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 		return nil, fmt.Errorf("Could not allocate IP for network %s interface %s", a.conf.Name, config.InterfaceName())
 	}
 
-	_, eniSubnet, err := net.ParseCIDR(config.CIDRBlock)
-
 	return &podNet{
 		ContainerIP:  reservedIP,
-		ENIIp:        net.IPNet{IP: net.ParseIP(config.InterfaceIP), Mask: eniSubnet.Mask},
+		ENIIp:        net.IPNet{IP: config.InterfaceIP, Mask: config.CIDRBlock.Mask},
 		ENIInterface: config.InterfaceName(),
-		ENISubnet:    eniSubnet,
+		ENISubnet:    config.CIDRBlock.IPNet(),
 		ENI:          config,
 	}, nil
 }
