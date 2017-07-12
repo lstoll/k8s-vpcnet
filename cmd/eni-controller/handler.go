@@ -59,7 +59,8 @@ func (c *Controller) handleNode(key string) error {
 
 	// if we have to congfiguration, taint the node that we don't ASAP to avoid
 	// pods being scheuled on the node. We should ensure our configuration
-	// daemonset tolerates this.
+	// daemonset tolerates this. Also label the node with the instance ID, to
+	// facilitate the node agents watch
 	if nc == nil && !hasTaint(node, taintNoInterface, v1.TaintEffectNoSchedule) {
 		glog.Infof("Node %s has no configuration, tainting with %s", node.Name, taintNoInterface)
 		c.updateNode(node.Name, func(n *v1.Node) {
@@ -69,6 +70,7 @@ func (c *Controller) handleNode(key string) error {
 					Effect: v1.TaintEffectNoSchedule,
 				},
 			)
+			n.Labels["aws-instance-id"] = node.Spec.ExternalID
 		})
 		// and bail out, our update will triger a new watch loop that'll pass this
 		return nil

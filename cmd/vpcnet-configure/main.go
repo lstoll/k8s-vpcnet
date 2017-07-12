@@ -19,9 +19,12 @@ import (
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/selection"
+	runtimeutil "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	client_v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -92,6 +95,13 @@ func main() {
 }
 
 func runk8s(vpcnetConfig *config.Config) {
+	sess := session.Must(session.NewSession())
+	md := ec2metadata.New(sess)
+	iid, err := md.GetMetadata("instance-id")
+	if err != nil {
+		glog.Fatalf("Error determining current instance ID [%v]", err)
+	}
+
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -105,15 +115,43 @@ func runk8s(vpcnetConfig *config.Config) {
 
 	// TODO - how do we just watch a limted node? Do we need the controller to
 	// add a label for the instance id maybe to them maybe, and filter on that?
-	watchlist := cache.NewListWatchFromClient(
-		clientset.Core().RESTClient(),
-		"nodes", v1.NamespaceAll,
-		fields.Everything(),
-	)
+	// watchlist := cache.NewListWatchFromClient(
+	// 	clientset.Core().RESTClient(),
+	// 	"nodes", v1.NamespaceAll,
+	// 	fields.OneTermEqualSelector("aws-instance-id", iid),
+	// )
+
+	selector := labels.NewSelector()
+	iidReq, err := labels.NewRequirement("aws-instance-id", selection.Equals, []string{iid})
+	if err != nil {
+		glog.Fatalf("Instance ID label selector is not valid [%+v]", err)
+	}
+	selector = selector.Add(*iidReq)
+
+	listFunc := func(options meta_v1.ListOptions) (runtime.Object, error) {
+		return clientset.Core().RESTClient().Get().
+			Namespace(v1.NamespaceAll).
+			Resource("nodes").
+			VersionedParams(&options, meta_v1.ParameterCodec).
+			LabelsSelectorParam(selector).
+			Do().
+			Get()
+	}
+
+	watchFunc := func(options meta_v1.ListOptions) (watch.Interface, error) {
+		options.Watch = true
+		return clientset.Core().RESTClient().Get().
+			Namespace(v1.NamespaceAll).
+			Resource("nodes").
+			VersionedParams(&options, meta_v1.ParameterCodec).
+			LabelsSelectorParam(selector).
+			Watch()
+	}
+	lw := &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
 
 	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-	indexer, informer := cache.NewIndexerInformer(watchlist, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(lw, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -137,13 +175,6 @@ func runk8s(vpcnetConfig *config.Config) {
 	}, cache.Indexers{})
 
 	nodesClient := clientset.Nodes()
-
-	sess := session.Must(session.NewSession())
-	md := ec2metadata.New(sess)
-	iid, err := md.GetMetadata("instance-id")
-	if err != nil {
-		glog.Fatalf("Error determining current instance ID [%v]", err)
-	}
 
 	c := &controller{
 		indexer:      indexer,
@@ -353,12 +384,12 @@ func (c *controller) handleErr(err error, key interface{}) {
 
 	c.queue.Forget(key)
 	// Report to an external entity that, even after several retries, we could not successfully process this key
-	runtime.HandleError(err)
+	runtimeutil.HandleError(err)
 	glog.Infof("Dropping node %q out of the queue: %v", key, err)
 }
 
 func (c *controller) Run(threadiness int, stopCh chan struct{}) {
-	defer runtime.HandleCrash()
+	defer runtimeutil.HandleCrash()
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
@@ -368,7 +399,7 @@ func (c *controller) Run(threadiness int, stopCh chan struct{}) {
 
 	// Wait for all involved caches to be synced, before processing items from the queue is started
 	if !cache.WaitForCacheSync(stopCh, c.informer.HasSynced) {
-		runtime.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
+		runtimeutil.HandleError(fmt.Errorf("Timed out waiting for caches to sync"))
 		return
 	}
 
