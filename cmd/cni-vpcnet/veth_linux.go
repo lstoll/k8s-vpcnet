@@ -167,7 +167,8 @@ func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) 
 	// Traffic from anywhere to pod IP "iif" the host eni eth should jump to toPodRT
 	fromRule := netlink.NewRule()
 	fromRule.Table = config.ToPodRTBase + eniAttachIndex
-	fromRule.IifName = eniName
+	// TODO - is this actually necessary? Not sure why
+	// fromRule.IifName = eniName
 	fromRule.Src = &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
 	fromRule.Dst = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
 
