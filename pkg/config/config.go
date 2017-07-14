@@ -73,6 +73,9 @@ type Network struct {
 	// PodIPMasq indicated if we should masquerade external pod traffic from the
 	// hosts's main interface
 	PodIPMasq bool `toml:"pod_ip_masq"`
+	// InstanceMetadataRedirectPort is the port on the machines main IP we
+	// should redirect all instance metadata traffic to. Use with kube2iam
+	InstanceMetadataRedirectPort int `toml:"instance_metadata_redirect_port"`
 }
 
 // Logging is the master configuration for this app. It is updated from a ConfigMap

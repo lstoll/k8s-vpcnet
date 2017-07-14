@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/golang/glog"
-	"github.com/lstoll/k8s-vpcnet/pkg/cni/ipmasq"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
@@ -157,18 +157,66 @@ func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, 
 	return nil
 }
 
-func configureIPMasq(cfg *config.Network, ips []net.IP) error {
+func configureIPMasq(cfg *config.Network, hostIP net.IP, podIPs []net.IP) error {
 	if cfg.PodIPMasq {
-		err := ipmasq.Setup(
-			"K8S-VPCNET",
-			"k8s-vpcnet generated rules for masquerading outbound pod traffic",
-			ips,
-			// Don't masq our traffic, or (service traffic? or does service traffic need to masq from a diff IP?)
-			[]*net.IPNet{cfg.ClusterCIDR.IPNet(), cfg.ServiceCIDR.IPNet()},
-		)
+		ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
 		if err != nil {
-			glog.Errorf("Error inserting IPTables rules [%+v]", err)
-			return errors.Wrap(err, "Error inserting IPTables rule")
+			return errors.Wrap(err, "failed to locate iptables: %v")
+		}
+
+		chain := "K8S-VPCNET"
+		comment := "k8s-vpcnet generated rules for masquerading outbound pod traffic"
+		multicastNet := &net.IPNet{IP: net.ParseIP("224.0.0.0"), Mask: net.CIDRMask(4, 32)}
+
+		exists := false
+		chains, err := ipt.ListChains("nat")
+		if err != nil {
+			return errors.Wrap(err, "failed to list chains")
+		}
+		for _, ch := range chains {
+			if ch == chain {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			err = ipt.NewChain("nat", chain)
+			if err != nil {
+				return errors.Wrap(err, "Error creating chain")
+			}
+		}
+
+		// Packets to these network should pass through like normal
+		for _, sn := range []*net.IPNet{cfg.ClusterCIDR.IPNet(), cfg.ServiceCIDR.IPNet(), multicastNet} {
+			if err := ipt.AppendUnique("nat", chain, "-d", sn.String(), "-j", "ACCEPT", "-m", "comment", "--comment", comment); err != nil {
+				return errors.Wrap(err, "Error adding skip rule")
+			}
+		}
+
+		// Don't masquerade multicast - pods should be able to talk to other pods
+		// on the local network via multicast.
+		err = ipt.AppendUnique("nat", chain, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+		if err != nil {
+			return errors.Wrap(err, "Error adding masquerade rull")
+		}
+
+		for _, ip := range podIPs {
+			err := ipt.AppendUnique("nat", "POSTROUTING", "-s", ip.String()+"/32", "-j", chain, "-m", "comment", "--comment", comment)
+			if err != nil {
+				return errors.Wrapf(err, "Error inserting jump for pod IP %v", ip)
+			}
+
+			if cfg.InstanceMetadataRedirectPort != 0 {
+				// Redirect instance metadata traffic to this port on the hosts main IP.
+				err := ipt.AppendUnique("nat", "PREROUTING",
+					"-s", ip.String()+"/32", "-d", "169.254.169.254", "-p", "tcp", "--dport", "80",
+					"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", hostIP.String(), cfg.InstanceMetadataRedirectPort),
+					"-m", "comment", "--comment", comment,
+				)
+				if err != nil {
+					return errors.Wrapf(err, "Error inserting jump for pod IP %v", ip)
+				}
+			}
 		}
 	}
 	return nil
