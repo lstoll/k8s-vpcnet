@@ -153,9 +153,10 @@ func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.
 			Scope: netlink.SCOPE_LINK,
 			Src:   eniIP,
 		},
-		// toPodRT should have link scope route to pod IP via pod
+		// fromPodRT should have the same link scope route
+		// WAS: toPodRT should have link scope route to pod IP via pod
 		{
-			Table:     config.ToPodRTBase + eniAttachIndex,
+			Table:     config.FromPodRTBase + eniAttachIndex,
 			LinkIndex: vethLinkIndex,
 			Dst:       &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)},
 			Scope:     netlink.SCOPE_LINK,
@@ -165,20 +166,20 @@ func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.
 
 func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) []*netlink.Rule {
 	// Traffic from anywhere to pod IP "iif" the host eni eth should jump to toPodRT
-	fromRule := netlink.NewRule()
-	fromRule.Table = config.ToPodRTBase + eniAttachIndex
-	// TODO - is this actually necessary? Not sure why
-	// fromRule.IifName = eniName
-	fromRule.Src = &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
-	fromRule.Dst = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
+	// toRule := netlink.NewRule()
+	// toRule.Table = config.ToPodRTBase + eniAttachIndex
+	// // TODO - is this actually necessary? Not sure why
+	// // fromRule.IifName = eniName
+	// toRule.Src = &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
+	// toRule.Dst = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
 
 	// Traffic from pod IP iif the veth should jump to fromPodRT
-	toRule := netlink.NewRule()
-	toRule.Table = config.FromPodRTBase + eniAttachIndex
-	toRule.IifName = vethName
-	toRule.Src = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
+	fromRule := netlink.NewRule()
+	fromRule.Table = config.FromPodRTBase + eniAttachIndex
+	fromRule.IifName = vethName
+	fromRule.Src = &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)}
 
-	return []*netlink.Rule{fromRule, toRule}
+	return []*netlink.Rule{fromRule} //, toRule}
 }
 
 func (v *vetherImpl) TeardownVeth(cfg *cniconfig.CNI, nspath, ifname string, released []net.IP) error {
