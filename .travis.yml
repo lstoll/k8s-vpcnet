@@ -8,7 +8,7 @@ before_script:
 jobs:
   include:
     - stage: test
-      script: make build test && sudo $(which go) test -v ./cmd/cni-vpcnet/ -vethtests && sudo $(which go) test -v ./pkg/cni/ipmasq -runipmasqtests
+      script: make build test && sudo $(which go) test -v ./cmd/cni-vpcnet/ -vethtests && sudo $(which go) test -v ./cmd/vpcnet-configure -allow-netns
       sudo: true
     - stage: deploy
       script: make release
