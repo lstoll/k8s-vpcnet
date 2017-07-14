@@ -101,6 +101,11 @@ func runk8s(vpcnetConfig *config.Config) {
 	if err != nil {
 		glog.Fatalf("Error determining current instance ID [%v]", err)
 	}
+	hostIPStr, err := md.GetMetadata("local-ipv4")
+	if err != nil {
+		glog.Fatalf("Error determining host IP address [%+v]", err)
+	}
+	hostIP := net.ParseIP(hostIPStr)
 
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -183,6 +188,7 @@ func runk8s(vpcnetConfig *config.Config) {
 		instanceID:   iid,
 		nodesClient:  nodesClient,
 		vpcnetConfig: vpcnetConfig,
+		hostIP:       hostIP,
 	}
 
 	// Now let's start the controller
@@ -201,6 +207,7 @@ type controller struct {
 	nodesClient  client_v1.NodeInterface
 	instanceID   string
 	vpcnetConfig *config.Config
+	hostIP       net.IP
 }
 
 func (c *controller) handleNode(key string) error {
@@ -267,6 +274,7 @@ func (c *controller) handleNode(key string) error {
 
 				err = configureIPMasq(
 					c.vpcnetConfig.Network,
+					c.hostIP,
 					config.IPs,
 				)
 				if err != nil {

@@ -16,6 +16,13 @@ data:
     # main interface. Generally this will be desired, unless you have a NAT
     # Gateway set on the subnet the pods reside in.
     pod_ip_masq = true
+    # Where we should redirect traffic destined for the instance metadata
+    # endpoint. Calls to it will be rewrote to the machines main IP on the
+    # specified port. Intended for use with https://github.com/jtblin/kube2iam .
+    # If this is not set or empty, all traffic from pods to the instance
+    # metadata API will be dropped - it represents a security risk in most
+    # cases.
+    instance_metadata_redirect_port = 8181
 
     [logging]
     # The verbosity level for CNI plugin. Higher to begin with, to make sure we

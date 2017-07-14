@@ -17,7 +17,7 @@ func interfaceExists(name string) (bool, error) {
 	return true, nil
 }
 
-func configureIPMasq(cfg *config.Network, ips []net.IP) error {
+func configureIPMasq(cfg *config.Network, hostIP net.IP, ips []net.IP) error {
 	return nil
 }
 
