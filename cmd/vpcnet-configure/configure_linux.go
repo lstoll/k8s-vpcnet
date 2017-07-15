@@ -20,37 +20,33 @@ const (
 
 func configureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IPNet) error {
 	// Find the interface AWS attached
-	ifs, err := net.Interfaces()
+	ifs, err := netlink.LinkList()
 	if err != nil {
 		return err
 	}
-	var hostIf *net.Interface
+	var hostIf netlink.Link
 	for _, i := range ifs {
-		if i.HardwareAddr.String() == mac {
-			hostIf = &i
+		if i.Attrs().HardwareAddr.String() == mac {
+			hostIf = i
 		}
 	}
 	if hostIf == nil {
 		return fmt.Errorf("No interface found on system with MAC %q", mac)
 	}
+	glog.V(2).Infof("Found host interface %s with MAC %s, will configure as %s", hostIf.Attrs().Name, mac, ifname)
 
-	hostNLif, err := netlink.LinkByName(hostIf.Name)
+	err = netlink.LinkSetName(hostIf, ifname)
 	if err != nil {
-		return errors.Wrapf(err, "Error getting link %q", hostIf.Name)
-	}
-
-	err = netlink.LinkSetName(hostNLif, ifname)
-	if err != nil {
-		return errors.Wrapf(err, "Error renaming interface %s to %s", hostIf.Name, ifname)
+		return errors.Wrapf(err, "Error renaming interface %s to %s", hostIf.Attrs().Name, ifname)
 	}
 
 	addr := &netlink.Addr{IPNet: ip, Label: ""}
-	if err := netlink.AddrAdd(hostNLif, addr); err != nil {
-		return errors.Wrapf(err, "Could not add %s to %s", ip, hostIf.Name)
+	if err := netlink.AddrAdd(hostIf, addr); err != nil {
+		return errors.Wrapf(err, "Could not add %s to %s", ip, hostIf.Attrs().Name)
 	}
 
-	if err := netlink.LinkSetUp(hostNLif); err != nil {
-		return errors.Wrapf(err, "Error bringing host interface %q up", hostIf.Name)
+	if err := netlink.LinkSetUp(hostIf); err != nil {
+		return errors.Wrapf(err, "Error bringing host interface %q up", hostIf.Attrs().Name)
 	}
 
 	// TODO - drop any routes that are created automatically?
@@ -246,7 +242,7 @@ func ensureTables(ifName string, eniAttachIndex int) error {
 	}
 	for _, l := range []string{
 		fmt.Sprintf("%d frompod-%s", config.FromPodRTBase+eniAttachIndex, ifName),
-		fmt.Sprintf("%d topod-%s", config.ToPodRTBase+eniAttachIndex, ifName),
+		//fmt.Sprintf("%d topod-%s", config.ToPodRTBase+eniAttachIndex, ifName),
 	} {
 		if !strings.Contains(string(curr), l+"\n") {
 			f, err := os.OpenFile("/etc/iproute2/rt_tables", os.O_RDWR|os.O_APPEND, 0640)

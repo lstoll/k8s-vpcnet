@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
+	k8svpcnet "github.com/lstoll/k8s-vpcnet"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
@@ -21,9 +22,6 @@ import (
 const (
 	// noInterfaceTaint is the key used on the taint before the node has an interface
 	taintNoInterface = "k8s-vpcnet/no-interface-configured"
-	// ipAddrCount is the number of addresses to assign to an ENI
-	// TODO - table out for instance type
-	ipAddrCount = 10
 )
 
 // handleNode is the business logic of the controller.
@@ -54,16 +52,89 @@ func (c *Controller) handleNode(key string) error {
 		return nil
 	}
 
-	// Check to see if we have a configuration
+	// See if we've stored additional instance data. If not, fetch and set
+	instanceInfo, err := vpcnetstate.AWSInstanceInfoFromAnnotations(node.Annotations)
+	if err != nil {
+		return errors.Wrapf(err, "Error unpacking instance info from annotations on node %s", node.Name)
+	}
+	if instanceInfo == nil {
+		inst, err := c.getInstance(node)
+		if err != nil {
+			return errors.Wrapf(err, "Error fetching instance for node %s", node.Name)
+		}
+		instanceInfo = &vpcnetstate.AWSInstanceInfo{
+			InstanceType: *inst.InstanceType,
+			SubnetID:     *inst.SubnetId,
+		}
+		for _, sg := range inst.SecurityGroups {
+			instanceInfo.SecurityGroupIDs = append(instanceInfo.SecurityGroupIDs, *sg.GroupId)
+		}
+
+		subResp, err := c.ec2Client.DescribeSubnets(
+			&ec2.DescribeSubnetsInput{SubnetIds: aws.StringSlice([]string{*inst.SubnetId})},
+		)
+		if err != nil {
+			return errors.Wrapf(err, "Error fetching subnet info for %s", *inst.SubnetId)
+		}
+		if len(subResp.Subnets) != 1 {
+			return fmt.Errorf("Expected one subnet match for %q, got %v", *inst.SubnetId, subResp.Subnets)
+		}
+
+		_, cb, err := net.ParseCIDR(*subResp.Subnets[0].CidrBlock)
+		if err != nil {
+			return errors.Wrapf(err, "Error getting ipnet from %q", *subResp.Subnets[0].CidrBlock)
+		}
+		instanceInfo.SubnetCIDR = (*config.IPNet)(cb)
+
+		iiJSON, err := json.Marshal(instanceInfo)
+		if err != nil {
+			return errors.Wrap(err, "Error marshaling instance info JSON")
+		}
+
+		err = c.updateNode(node.Name, func(n *v1.Node) {
+			n.Annotations[vpcnetstate.EC2InfoKey] = string(iiJSON)
+		})
+		if err != nil {
+			return errors.Wrapf(err, "error writing instance info for node %s", node.Name)
+		}
+		return nil // always bail out after an update, to let the watch re-trigger
+	}
+
+	numENIs, ok := k8svpcnet.InstanceENIsAvailable[instanceInfo.InstanceType]
+	if !ok {
+		return fmt.Errorf(
+			"we have no ENI mapping info for node %s's instance type %s, cannot configure interfaces",
+			node.Name, instanceInfo.InstanceType,
+		)
+	}
+	// drop one, to account for the default first interface
+	numENIs = numENIs - 1
+
+	numIPs, ok := k8svpcnet.InstanceIPsAvailable[instanceInfo.InstanceType]
+	if !ok {
+		return fmt.Errorf(
+			"we have no IP mapping info for node %s's instance type %s, cannot configure interfaces",
+			node.Name, instanceInfo.InstanceType,
+		)
+	}
+
+	// Check to see if we have a ENI configuration
 	nc, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
+	if err != nil {
+		return errors.Wrapf(err, "Error parsing ENI config from annotation for node %s", node.Name)
+	}
+	// If not, start a new empty one
+	if nc == nil {
+		nc = vpcnetstate.ENIs{}
+	}
 
 	// if we have to congfiguration, taint the node that we don't ASAP to avoid
 	// pods being scheuled on the node. We should ensure our configuration
 	// daemonset tolerates this. Also label the node with the instance ID, to
 	// facilitate the node agents watch
-	if nc == nil && !hasTaint(node, taintNoInterface, v1.TaintEffectNoSchedule) {
+	if len(nc) == 0 && !hasTaint(node, taintNoInterface, v1.TaintEffectNoSchedule) {
 		glog.Infof("Node %s has no configuration, tainting with %s", node.Name, taintNoInterface)
-		c.updateNode(node.Name, func(n *v1.Node) {
+		err = c.updateNode(node.Name, func(n *v1.Node) {
 			n.Spec.Taints = append(n.Spec.Taints,
 				v1.Taint{
 					Key:    taintNoInterface,
@@ -72,37 +143,16 @@ func (c *Controller) handleNode(key string) error {
 			)
 			n.Labels["aws-instance-id"] = node.Spec.ExternalID
 		})
-		// and bail out, our update will triger a new watch loop that'll pass this
-		return nil
-	}
-
-	// If we have no configuration, create and provision an ENI, and store the
-	// configuration on the interface
-	if nc == nil {
-		glog.Infof("Node %s has no configuration, creating an ENI", node.Name)
-		newIf, err := c.createENI(node)
 		if err != nil {
-			return err
+			return errors.Wrapf(err, "Error updating node %s", node.Name)
 		}
-		// Static for now, we can change this when we use more than one ENI
-		// Start at 1, host IF is 0
-		newIf.Index = 1
-		ifsJSON, err := json.Marshal(vpcnetstate.ENIs{newIf})
-		if err != nil {
-			glog.Infof("Node %s - error marshaling interface %v [%v]", node.Name, newIf, err)
-			return err
-		}
-		c.updateNode(node.Name, func(n *v1.Node) {
-			n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
-		})
-		// and bail out, next watch can take over
-		return nil
+		return nil // we just updated, wait for next watch trigger
 	}
 
 	// If we have an unattached interface, attach it
 	for _, eni := range nc {
 		if !eni.Attached {
-			glog.Infof("Node %s has an unattached ENI, attaching it", node.Name)
+			glog.Infof("Node %s has an unattached ENI at index %d, attaching it", eni.Index, node.Name)
 			err := c.attachENI(node, eni)
 			if err != nil {
 				return err
@@ -122,6 +172,33 @@ func (c *Controller) handleNode(key string) error {
 		}
 	}
 
+	// If we don't have the max number of ENI's, add one. Do one at a time to make sure
+	// we have them persisted
+	if len(nc) < numENIs {
+		glog.Infof("Adding an ENI to node %s", node.Name)
+		newIf, err := c.createENI(node.Name, instanceInfo, numIPs)
+		if err != nil {
+			return err
+		}
+		// Start at 1, host IF is 0
+		newIf.Index = len(nc) + 1
+		newIf.CIDRBlock = instanceInfo.SubnetCIDR
+		nc = append(nc, newIf)
+		ifsJSON, err := json.Marshal(nc)
+		if err != nil {
+			glog.Infof("Node %s - error marshaling interface %v [%v]", node.Name, newIf, err)
+			return err
+		}
+		err = c.updateNode(node.Name, func(n *v1.Node) {
+			n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
+		})
+		if err != nil {
+			return errors.Wrapf(err, "Error updating ENI annotation on node %s", node.Name)
+		}
+		// and bail out, next watch can take over
+		return nil
+	}
+
 	return nil
 }
 
@@ -133,7 +210,7 @@ func (c *Controller) cleanupNode(key string) error {
 }
 
 // updateNode will get/update the node until there is no conflict. The passed in
-// function is used as the mutator
+// function is used as the mutator.
 func (c *Controller) updateNode(name string, mutator func(node *v1.Node)) error {
 	node, err := c.nodesClient.Get(name, meta_v1.GetOptions{})
 	if err != nil {
@@ -190,40 +267,17 @@ func (c *Controller) getInstance(node *v1.Node) (*ec2.Instance, error) {
 
 // createENI will create a new ENI with the number of IPs noted. It will return
 // the interface definition
-func (c *Controller) createENI(node *v1.Node) (*vpcnetstate.ENI, error) {
-	inst, err := c.getInstance(node)
-	if err != nil {
-		return nil, err
-	}
-
-	subnetID := *inst.SubnetId
-
-	subResp, err := c.ec2Client.DescribeSubnets(
-		&ec2.DescribeSubnetsInput{SubnetIds: aws.StringSlice([]string{subnetID})},
-	)
-	if err != nil {
-		glog.Errorf("Error fetching subnet info for %s [%v]", subnetID, err)
-		return nil, err
-	}
-	if len(subResp.Subnets) != 1 {
-		return nil, fmt.Errorf("Expected one subnet match for %q, got %v", subnetID, subResp.Subnets)
-	}
-
-	securityGroups := []string{}
-	for _, sg := range inst.SecurityGroups {
-		securityGroups = append(securityGroups, *sg.GroupId)
-	}
-
+func (c *Controller) createENI(nodeName string, instanceInfo *vpcnetstate.AWSInstanceInfo, numIPs int) (*vpcnetstate.ENI, error) {
 	ceniResp, err := c.ec2Client.CreateNetworkInterface(
 		&ec2.CreateNetworkInterfaceInput{
-			Description:                    aws.String(fmt.Sprintf("K8S ENI for instance %s node %s", *inst.InstanceId, node.Name)),
-			Groups:                         aws.StringSlice(securityGroups),
-			SubnetId:                       aws.String(subnetID),
-			SecondaryPrivateIpAddressCount: aws.Int64(int64(ipAddrCount - 1)), // -1 for the "host" IP
+			Description:                    aws.String(fmt.Sprintf("K8S ENI for node %s", nodeName)),
+			Groups:                         aws.StringSlice(instanceInfo.SecurityGroupIDs),
+			SubnetId:                       aws.String(instanceInfo.SubnetID),
+			SecondaryPrivateIpAddressCount: aws.Int64(int64(numIPs - 1)), // -1 for the "host" IP
 		},
 	)
 	if err != nil {
-		glog.Errorf("Error creating network interface for node %s [%v]", node.Name, err)
+		glog.Errorf("Error creating network interface for node %s [%v]", nodeName, err)
 		return nil, err
 	}
 
@@ -234,15 +288,10 @@ func (c *Controller) createENI(node *v1.Node) (*vpcnetstate.ENI, error) {
 		}
 	}
 
-	_, cb, err := net.ParseCIDR(*subResp.Subnets[0].CidrBlock)
-	if err != nil {
-		return nil, errors.Wrapf(err, "Error getting ipnet from %q", *subResp.Subnets[0].CidrBlock)
-	}
 	return &vpcnetstate.ENI{
 		EniID:       *ceniResp.NetworkInterface.NetworkInterfaceId,
 		Attached:    false,
 		InterfaceIP: net.ParseIP(*ceniResp.NetworkInterface.PrivateIpAddress),
-		CIDRBlock:   (*config.IPNet)(cb),
 		IPs:         ips,
 		MACAddress:  *ceniResp.NetworkInterface.MacAddress,
 	}, nil
@@ -292,4 +341,15 @@ func hasTaint(node *v1.Node, key string, effect v1.TaintEffect) bool {
 		}
 	}
 	return false
+}
+
+// numAttached returns the number of attached ENI interfaces
+func numAttached(enis vpcnetstate.ENIs) int {
+	num := 0
+	for _, eni := range enis {
+		if eni.Attached {
+			num++
+		}
+	}
+	return num
 }

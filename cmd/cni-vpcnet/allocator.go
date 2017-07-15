@@ -24,18 +24,20 @@ type ipAllocator struct {
 	eniMap vpcnetstate.ENIs
 }
 
+type ifFreeIPs struct {
+	ifName string
+	ips    []net.IP
+}
+
 // Get returns newly allocated IP along with its config
 func (a *ipAllocator) Get(id string) (*podNet, error) {
 	a.store.Lock()
 	defer a.store.Unlock()
 
-	// TODO - handle multiple ENI's
-	if len(a.eniMap) != 1 {
-		return nil, fmt.Errorf("We can only handle a single ENI, found %d", len(a.eniMap))
+	var ips []net.IP
+	for _, eni := range a.eniMap {
+		ips = append(ips, eni.IPs...)
 	}
-	config := a.eniMap[0]
-
-	ips := config.IPs
 
 	if len(ips) == 0 {
 		return nil, ErrEmptyPool
@@ -44,7 +46,7 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	// Sort to ensure consistent ordering, for handling last used etc.
 	sort.Sort(netIps(ips))
 
-	lastReservedIP, err := a.store.LastReservedIP(config.InterfaceName())
+	lastReservedIP, err := a.store.LastReservedIP(a.conf.Name)
 	if err != nil || lastReservedIP == nil {
 		// Likely no last reserved. Just start from the beginning
 	} else {
@@ -59,7 +61,7 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	// Walk until we find a free IPs
 	var reservedIP net.IP
 	for _, ip := range ips {
-		reserved, err := a.store.Reserve(id, ip, config.InterfaceName())
+		reserved, err := a.store.Reserve(id, ip, a.conf.Name)
 		if err != nil {
 			return nil, errors.Wrap(err, "Error reserving IP in store")
 		}
@@ -70,15 +72,29 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	}
 
 	if reservedIP == nil {
-		return nil, fmt.Errorf("Could not allocate IP for network %s interface %s", a.conf.Name, config.InterfaceName())
+		return nil, fmt.Errorf("Could not allocate IP for network %s", a.conf.Name)
+	}
+
+	// Find the ENI that has this
+	var eni *vpcnetstate.ENI
+	for _, e := range a.eniMap {
+		for _, ip := range e.IPs {
+			if ip.Equal(reservedIP) {
+				eni = e
+			}
+		}
+	}
+
+	if eni == nil {
+		panic("Internal state issue - could not find ENI for IP that came from ENI list")
 	}
 
 	return &podNet{
 		ContainerIP:  reservedIP,
-		ENIIp:        net.IPNet{IP: config.InterfaceIP, Mask: config.CIDRBlock.Mask},
-		ENIInterface: config.InterfaceName(),
-		ENISubnet:    config.CIDRBlock.IPNet(),
-		ENI:          config,
+		ENIIp:        net.IPNet{IP: eni.InterfaceIP, Mask: eni.CIDRBlock.Mask},
+		ENIInterface: eni.InterfaceName(),
+		ENISubnet:    eni.CIDRBlock.IPNet(),
+		ENI:          eni,
 	}, nil
 }
 

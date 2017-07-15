@@ -248,7 +248,7 @@ func (c *controller) handleNode(key string) error {
 
 	for _, config := range nc {
 		if config.Attached {
-			glog.V(2).Infof("Node %s has interface %s attached", node.Name, config.EniID)
+			glog.V(2).Infof("Node %s has interface %s attached with MAC %s at index %d", node.Name, config.EniID, config.MACAddress, config.Index)
 			exists, err := interfaceExists(config.InterfaceName())
 			if err != nil {
 				return err
@@ -330,11 +330,10 @@ func (c *controller) handleNode(key string) error {
 		defer store.Close()
 
 		c.reconciler = &reconciler{
-			store:      store,
-			eniMapPath: netconfPath,
-			indexer:    c.indexer,
-			nodeName:   node.Name,
-			clientSet:  c.clientSet,
+			store:     store,
+			indexer:   c.indexer,
+			nodeName:  node.Name,
+			clientSet: c.clientSet,
 		}
 
 		go func() {

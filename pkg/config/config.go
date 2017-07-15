@@ -59,9 +59,6 @@ const (
 	// FromPodRTBase is the base number we use + attach index to number the from
 	// pod routing table
 	FromPodRTBase = 120
-	// ToPodRTBase is the base number we use + attach index to number the to
-	// pod routing table
-	ToPodRTBase = 160
 )
 
 // Network is the network topology related configuration for this cluster

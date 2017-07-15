@@ -40,11 +40,11 @@ var testMap = vpcnetstate.ENIs{
 	},
 }
 
-func (v *testVether) SetupVeth(cfg *cniconfig.CNI, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
+func (v *testVether) SetupVeth(cfg *cniconfig.CNI, em vpcnetstate.ENIs, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
 	return v.hostIf, v.contIf, v.setupErr
 }
 
-func (v *testVether) TeardownVeth(cfg *cniconfig.CNI, nspath, ifname string, released []net.IP) error {
+func (v *testVether) TeardownVeth(cfg *cniconfig.CNI, em vpcnetstate.ENIs, nspath, ifname string, released []net.IP) error {
 	return v.teardownError
 }
 

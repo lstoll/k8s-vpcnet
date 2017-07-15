@@ -15,7 +15,7 @@ import (
 	"github.com/vishvananda/netlink"
 )
 
-var runIftests bool
+var allowNetNS bool
 
 const cniJSON = `{
    "cniVersion": "0.3.1",
@@ -24,14 +24,14 @@ const cniJSON = `{
  }`
 
 func init() {
-	flag.BoolVar(&runIftests, "vethtests", false, "Run the veth interface tests. Configures namespaces/interfaces etc, requires superuser")
+	flag.BoolVar(&allowNetNS, "allow-netns", false, "Run tests that configure namespaces/interfaces etc, requires superuser")
 	flag.Parse()
 }
 
 func TestVeth(t *testing.T) {
 	v := &vetherImpl{}
 
-	if !runIftests {
+	if !allowNetNS {
 		t.Skip("Not flagged in to run interface tests")
 	}
 
@@ -64,14 +64,23 @@ func TestVeth(t *testing.T) {
 			pn := &podNet{
 				ContainerIP:  net.ParseIP("10.9.0.5"),
 				ENIIp:        net.IPNet{IP: net.ParseIP("10.9.0.3"), Mask: net.CIDRMask(32, 32)},
-				ENIInterface: "eni0", // Needs to exist inside the target NS
+				ENIInterface: "eni1", // Needs to exist inside the target NS
 				ENISubnet:    &net.IPNet{IP: net.ParseIP("10.9.0.0"), Mask: net.CIDRMask(24, 32)},
 				ENI: &vpcnetstate.ENI{
 					Index: 1,
 				},
 			}
 
-			// Create a fake ENI interface in the host NS
+			enis := vpcnetstate.ENIs{
+				{
+					Index: 1,
+				},
+				{
+					Index: 2,
+				},
+			}
+
+			// Create a fake ENI1 interface in the host NS
 			err = hostNS.Do(func(ns.NetNS) error {
 				dip := &net.IPNet{
 					IP:   pn.ENIIp.IP,
@@ -79,6 +88,21 @@ func TestVeth(t *testing.T) {
 				}
 
 				_ = DummyInterface(t, pn.ENIInterface, dip, true)
+
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("Error creating dummy eni interface [%v]", err)
+			}
+
+			// Create a fake ENI2 interface in the host NS
+			err = hostNS.Do(func(ns.NetNS) error {
+				dip := &net.IPNet{
+					IP:   pn.ENIIp.IP,
+					Mask: net.CIDRMask(24, 32),
+				}
+
+				_ = DummyInterface(t, "eni2", dip, true)
 
 				return nil
 			})
@@ -101,96 +125,97 @@ func TestVeth(t *testing.T) {
 				t.Fatalf("Error creating dummy eni interface [%v]", err)
 			}
 
-			// Run the creation in our fake host netns
-			err = hostNS.Do(func(ns.NetNS) error {
-				_, _, err = v.SetupVeth(&config.CNI{IPMasq: tc.Masq}, contNS.Path(), "eth0", pn)
-				return err
-			})
-			if err != nil {
-				t.Fatalf("Error setting up veth [%+v]", err)
+			for i := 0; i < 10; i++ {
+				// Run the creation in our fake host netns
+				err = hostNS.Do(func(ns.NetNS) error {
+					_, _, err = v.SetupVeth(&config.CNI{IPMasq: tc.Masq}, enis, contNS.Path(), "eth0", pn)
+					return err
+				})
+				if err != nil {
+					t.Fatalf("Error setting up veth [%+v]", err)
+				}
+
+				err = hostNS.Do(func(ns.NetNS) error {
+					cmd := exec.Command("ip", "route")
+					stdoutStderr, err := cmd.CombinedOutput()
+					if err != nil {
+						t.Fatalf("Error running command [%v]", err)
+					}
+					t.Logf("Host NS Routes:\n%s\n", stdoutStderr)
+
+					cmd = exec.Command("ip", "rule", "show")
+					stdoutStderr, err = cmd.CombinedOutput()
+					if err != nil {
+						t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
+					}
+					t.Logf("Host NS ip rules:\n%s\n", stdoutStderr)
+
+					// cmd = exec.Command("ip", "route", "show", "table", "frompod-eni1")
+					// stdoutStderr, err = cmd.CombinedOutput()
+					// if err != nil {
+					// 	t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
+					// }
+					// t.Logf("Host NS frompod table:\n%s\n", stdoutStderr)
+
+					// cmd = exec.Command("ip", "route", "show", "table", "topod-eni1")
+					// stdoutStderr, err = cmd.CombinedOutput()
+					// if err != nil {
+					// 	t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
+					// }
+					// t.Logf("Host NS topod table:\n%s\n", stdoutStderr)
+
+					err = testutils.Ping(pn.ENIIp.IP.String(), pn.ContainerIP.String(), false, 1)
+					if err != nil {
+						t.Errorf("Error pinging cont IP from host IP [%+v]", err)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatalf("Error running checks in host NS [%+v]", err)
+				}
+
+				err = contNS.Do(func(ns.NetNS) error {
+					cmd := exec.Command("ip", "route")
+					stdoutStderr, err := cmd.CombinedOutput()
+					if err != nil {
+						t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
+					}
+					t.Logf("Cont NS Routes:\n%s\n", stdoutStderr)
+
+					err = testutils.Ping(pn.ContainerIP.String(), pn.ENIIp.IP.String(), false, 1)
+					if err != nil {
+						t.Errorf("Error pinging address from container [%+v]", err)
+					}
+					return nil
+				})
+				if err != nil {
+					t.Fatalf("Error running checks in cont NS [%+v]", err)
+				}
+
+				err = hostNS.Do(func(ns.NetNS) error {
+					err := v.TeardownVeth(&config.CNI{IPMasq: tc.Masq}, enis, contNS.Path(), "eth0", []net.IP{pn.ContainerIP})
+					if err != nil {
+						t.Fatalf("Error tearing down veth [%+v]", err)
+					}
+
+					routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
+					if err != nil {
+						t.Fatalf("Error fetching host NS routes [%+v]", err)
+					}
+					t.Logf("routes: %+v", routes)
+
+					rules, err := netlink.RuleList(netlink.FAMILY_ALL)
+					if err != nil {
+						t.Fatalf("Error fetching host NS rules [%+v]", err)
+					}
+					t.Logf("rules: %+v", rules)
+
+					return nil
+				})
+				if err != nil {
+					t.Fatalf("Error tearing down veth [%v]")
+				}
 			}
-
-			err = hostNS.Do(func(ns.NetNS) error {
-				cmd := exec.Command("ip", "route")
-				stdoutStderr, err := cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("Error running command [%v]", err)
-				}
-				t.Logf("Host NS Routes:\n%s\n", stdoutStderr)
-
-				cmd = exec.Command("ip", "rule", "show")
-				stdoutStderr, err = cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
-				}
-				t.Logf("Host NS ip rules:\n%s\n", stdoutStderr)
-
-				// cmd = exec.Command("ip", "route", "show", "table", "frompod-eni1")
-				// stdoutStderr, err = cmd.CombinedOutput()
-				// if err != nil {
-				// 	t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
-				// }
-				// t.Logf("Host NS frompod table:\n%s\n", stdoutStderr)
-
-				// cmd = exec.Command("ip", "route", "show", "table", "topod-eni1")
-				// stdoutStderr, err = cmd.CombinedOutput()
-				// if err != nil {
-				// 	t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
-				// }
-				// t.Logf("Host NS topod table:\n%s\n", stdoutStderr)
-
-				err = testutils.Ping(pn.ENIIp.IP.String(), pn.ContainerIP.String(), false, 1)
-				if err != nil {
-					t.Errorf("Error pinging cont IP from host IP [%+v]", err)
-				}
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("Error running checks in host NS [%+v]", err)
-			}
-
-			err = contNS.Do(func(ns.NetNS) error {
-				cmd := exec.Command("ip", "route")
-				stdoutStderr, err := cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("Error running command [%v]: %s\n", err, stdoutStderr)
-				}
-				t.Logf("Cont NS Routes:\n%s\n", stdoutStderr)
-
-				err = testutils.Ping(pn.ContainerIP.String(), pn.ENIIp.IP.String(), false, 1)
-				if err != nil {
-					t.Errorf("Error pinging address from container [%+v]", err)
-				}
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("Error running checks in cont NS [%+v]", err)
-			}
-
-			err = hostNS.Do(func(ns.NetNS) error {
-				err := v.TeardownVeth(&config.CNI{IPMasq: tc.Masq}, contNS.Path(), "eth0", []net.IP{pn.ContainerIP})
-				if err != nil {
-					t.Fatalf("Error tearing down veth [%+v]", err)
-				}
-
-				routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
-				if err != nil {
-					t.Fatalf("Error fetching host NS routes [%+v]", err)
-				}
-				t.Logf("routes: %+v", routes)
-
-				rules, err := netlink.RuleList(netlink.FAMILY_ALL)
-				if err != nil {
-					t.Fatalf("Error fetching host NS rules [%+v]", err)
-				}
-				t.Logf("rules: %+v", rules)
-
-				return nil
-			})
-			if err != nil {
-				t.Fatalf("Error tearing down veth [%v]")
-			}
-
 		})
 	}
 }

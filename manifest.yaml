@@ -85,6 +85,8 @@ spec:
           effect: NoSchedule
         - key: "k8s-vpcnet/no-interface-configured"
           effect: NoSchedule
+        - key: "k8s-vpcnet/no-free-ips"
+          effect: NoSchedule
       hostNetwork: true
 ---
 apiVersion: v1
