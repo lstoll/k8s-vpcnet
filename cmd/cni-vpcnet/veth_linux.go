@@ -11,6 +11,7 @@ import (
 	"github.com/j-keck/arping"
 	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
 )
@@ -22,7 +23,7 @@ type vetherImpl struct {
 	cfg *cniconfig.CNI
 }
 
-func (v *vetherImpl) SetupVeth(cfg *cniconfig.CNI, netnsPath string, ifName string, podNet *podNet) (*current.Interface, *current.Interface, error) {
+func (v *vetherImpl) SetupVeth(cfg *cniconfig.CNI, enis vpcnetstate.ENIs, netnsPath string, ifName string, podNet *podNet) (*current.Interface, *current.Interface, error) {
 	hostInterface := &current.Interface{}
 	containerInterface := &current.Interface{}
 
@@ -126,7 +127,7 @@ func (v *vetherImpl) SetupVeth(cfg *cniconfig.CNI, netnsPath string, ifName stri
 	}
 
 	// Set up the routing rules to ensure traffic egresses the correct host interface
-	for _, r := range podRoutes(podNet.ENI.Index, hostVeth.Attrs().Index, podNet.ENI.InterfaceIP, podNet.ContainerIP) {
+	for _, r := range podRoutes(podNet.ENI.Index, hostVeth.Attrs().Index, podNet.ENI.InterfaceIP, podNet.ContainerIP, enis) {
 		if err := netlink.RouteAdd(r); err != nil {
 			return nil, nil, errors.Wrapf(err, "failed to add rule %v", r)
 		}
@@ -141,8 +142,8 @@ func (v *vetherImpl) SetupVeth(cfg *cniconfig.CNI, netnsPath string, ifName stri
 	return hostInterface, containerInterface, nil
 }
 
-func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.IP) []*netlink.Route {
-	return []*netlink.Route{
+func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.IP, enis vpcnetstate.ENIs) []*netlink.Route {
+	routes := []*netlink.Route{
 		// Route in the main table for the host to the pod
 		{
 			LinkIndex: vethLinkIndex,
@@ -153,15 +154,19 @@ func podRoutes(eniAttachIndex, vethLinkIndex int, eniIP net.IP, containerIP net.
 			Scope: netlink.SCOPE_LINK,
 			Src:   eniIP,
 		},
-		// fromPodRT should have the same link scope route
-		// WAS: toPodRT should have link scope route to pod IP via pod
-		{
-			Table:     config.FromPodRTBase + eniAttachIndex,
-			LinkIndex: vethLinkIndex,
-			Dst:       &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)},
-			Scope:     netlink.SCOPE_LINK,
-		},
 	}
+	// fromPodRT should have the same link scope route
+	// WAS: toPodRT should have link scope route to pod IP via pod
+	for _, eni := range enis {
+		routes = append(routes,
+			&netlink.Route{
+				Table:     config.FromPodRTBase + eni.Index,
+				LinkIndex: vethLinkIndex,
+				Dst:       &net.IPNet{IP: containerIP, Mask: net.CIDRMask(32, 32)},
+				Scope:     netlink.SCOPE_LINK,
+			})
+	}
+	return routes
 }
 
 func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) []*netlink.Rule {
@@ -182,7 +187,7 @@ func podRules(eniAttachIndex int, eniName, vethName string, containerIP net.IP) 
 	return []*netlink.Rule{fromRule} //, toRule}
 }
 
-func (v *vetherImpl) TeardownVeth(cfg *cniconfig.CNI, nspath, ifname string, released []net.IP) error {
+func (v *vetherImpl) TeardownVeth(cfg *cniconfig.CNI, enis vpcnetstate.ENIs, nspath, ifname string, released []net.IP) error {
 	err := ns.WithNetNSPath(nspath, func(_ ns.NetNS) error {
 		var err error
 		_, err = ip.DelLinkByNameAddr(ifname, netlink.FAMILY_V4)

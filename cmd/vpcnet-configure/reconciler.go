@@ -25,11 +25,10 @@ var podsURL = "http://localhost:10255/pods"
 var podsClient = &http.Client{Timeout: 5 * time.Second}
 
 type reconciler struct {
-	store      *diskstore.Store
-	eniMapPath string
-	indexer    cache.Indexer
-	nodeName   string
-	clientSet  kubernetes.Interface
+	store     *diskstore.Store
+	indexer   cache.Indexer
+	nodeName  string
+	clientSet kubernetes.Interface
 }
 
 // Reconcile will check the pods on this node vs. the allocated IP addresses,
@@ -71,16 +70,6 @@ func (r *reconciler) Reconcile() error {
 	// scheduling. Then look for containers that have a status of
 	// "ContainerCannotRun", with message "cannot join network" (?). Evict or
 	// delete the pod.
-	enis, err := vpcnetstate.ReadENIMap(r.eniMapPath)
-	if err != nil {
-		return errors.Wrapf(err, "Error reading ENI map from %s", r.eniMapPath)
-	}
-	var ipPoolSize int
-
-	for _, eni := range enis {
-		ipPoolSize += len(eni.IPs)
-	}
-
 	obj, exists, err := r.indexer.GetByKey(r.nodeName)
 	if err != nil {
 		return errors.Wrapf(err, "Fetching object with key %s from store failed", r.nodeName)
@@ -92,6 +81,16 @@ func (r *reconciler) Reconcile() error {
 	node, ok := obj.(*v1.Node)
 	if !ok {
 		return fmt.Errorf("object with key %s [%v] is not a node", r.nodeName, obj)
+	}
+
+	enis, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
+	if err != nil {
+		return errors.Wrapf(err, "Error reading ENI map from annotations")
+	}
+	var ipPoolSize int
+
+	for _, eni := range enis {
+		ipPoolSize += len(eni.IPs)
 	}
 
 	if len(alloced) >= ipPoolSize {

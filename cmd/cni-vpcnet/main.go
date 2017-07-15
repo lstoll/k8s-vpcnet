@@ -77,7 +77,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 		args.Netns,
 	)
 
-	hostIf, containerIf, err := c.vether.SetupVeth(conf, args.Netns, args.IfName, alloced)
+	hostIf, containerIf, err := c.vether.SetupVeth(conf, em, args.Netns, args.IfName, alloced)
 	if err != nil {
 		glog.Errorf("Error setting up interface for container %s [%+v]", args.ContainerID, err)
 		return err
@@ -109,7 +109,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 }
 
 func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
-	conf, _, err := loadConfig(args.StdinData)
+	conf, em, err := loadConfig(args.StdinData)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	}
 
 	if args.Netns != "" {
-		c.vether.TeardownVeth(conf, args.Netns, args.IfName, released)
+		c.vether.TeardownVeth(conf, em, args.Netns, args.IfName, released)
 	} else {
 		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
 	}

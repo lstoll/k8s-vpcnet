@@ -18,7 +18,11 @@ const DefaultENIMapPath = "/var/lib/cni/vpcnet/eni_map.json"
 
 // IFSKey is the key for the node annotation we use to persist interface
 // configuration
-const IFSKey = "eni-interfaces"
+const IFSKey = "k8s-vpcnet/eni-interfaces"
+
+// IFSKey is the key for the node annotation we use to persist interface
+// configuration
+const EC2InfoKey = "k8s-vpcnet/ec2-instance-info"
 
 // ENIs is the list of ENI's we store on a node
 type ENIs []*ENI
@@ -90,4 +94,36 @@ func ReadENIMap(path string) (ENIs, error) {
 		return nil, err
 	}
 	return am, nil
+}
+
+// AWSInstanceInfo represents additional instance metadata that we store on the
+// Node object, to avoid having to continually fetch it from the EC2 API
+type AWSInstanceInfo struct {
+	// InstanceType is the AWS type for this instance, e.g c4.large
+	InstanceType string `json:"instance_type"`
+	// SubnetID is the ID of the VPC subnet this instance lives in.
+	SubnetID string `json:"subnet_id"`
+	// SubnetCIDR is the netblock the subnet lives in
+	SubnetCIDR *config.IPNet `json:"subnet_cidr"`
+	// SecurityGroupIDs is the list of IDs for the security groups this instance
+	// has
+	SecurityGroupIDs []string `json:"security_group_ids"`
+}
+
+// AWSInstanceInfoFromAnnotations returns checks for instance metadata,
+// returning it if found or nil if it isn't
+func AWSInstanceInfoFromAnnotations(annotations map[string]string) (*AWSInstanceInfo, error) {
+	ifs, ok := annotations[EC2InfoKey]
+	if !ok {
+		return nil, nil
+	}
+
+	ii := &AWSInstanceInfo{}
+
+	err := json.Unmarshal([]byte(ifs), ii)
+	if err != nil {
+		return nil, errors.Wrap(err, "Error parsing instance info")
+	}
+
+	return ii, nil
 }

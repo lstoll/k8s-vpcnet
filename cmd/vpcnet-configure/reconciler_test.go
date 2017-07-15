@@ -144,7 +144,17 @@ func TestReconciler(t *testing.T) {
 				Items: tc.Pods,
 			})
 
-			testNode := &v1.Node{ObjectMeta: meta_v1.ObjectMeta{Name: "test-node"}}
+			eniJSON, err := json.Marshal(tc.ENIs)
+			if err != nil {
+				t.Fatalf("Error marshaling ENI data [%+v]", err)
+			}
+
+			testNode := &v1.Node{
+				ObjectMeta: meta_v1.ObjectMeta{
+					Name:        "test-node",
+					Annotations: map[string]string{vpcnetstate.IFSKey: string(eniJSON)},
+				},
+			}
 
 			apiObjs := []runtime.Object{}
 			apiObjs = append(apiObjs, testNode)
@@ -153,11 +163,10 @@ func TestReconciler(t *testing.T) {
 			}
 
 			r := &reconciler{
-				store:      ds,
-				eniMapPath: eniMapPath,
-				indexer:    newIndexer(testNode),
-				nodeName:   "test-node",
-				clientSet:  fake.NewSimpleClientset(apiObjs...),
+				store:     ds,
+				indexer:   newIndexer(testNode),
+				nodeName:  "test-node",
+				clientSet: fake.NewSimpleClientset(apiObjs...),
 			}
 
 			err = r.Reconcile()
