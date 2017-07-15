@@ -11,11 +11,12 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
+	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
-	"github.com/pkg/errors"
-
 	"github.com/lstoll/k8s-vpcnet/version"
+	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,10 @@ var (
 
 // noInterfaceTaint is the key used on the taint before the node has an interface
 const taintNoInterface = "k8s-vpcnet/no-interface-configured"
+
+// taintNoIPs is applied to the node when there are no free IPs for pods.
+// pods with net: host can tolerate this to get scheduled anyway
+const taintNoIPs = "k8s-vpcnet/no-free-ips"
 
 func main() {
 	flag.Set("logtostderr", "true")
@@ -179,19 +184,17 @@ func runk8s(vpcnetConfig *config.Config) {
 		},
 	}, cache.Indexers{})
 
-	nodesClient := clientset.Nodes()
-
+	// Run up the controller
 	c := &controller{
 		indexer:      indexer,
 		queue:        queue,
 		informer:     informer,
 		instanceID:   iid,
-		nodesClient:  nodesClient,
 		vpcnetConfig: vpcnetConfig,
 		hostIP:       hostIP,
+		clientSet:    clientset,
 	}
 
-	// Now let's start the controller
 	stop := make(chan struct{})
 	defer close(stop)
 	go c.Run(1, stop)
@@ -204,10 +207,11 @@ type controller struct {
 	indexer      cache.Indexer
 	queue        workqueue.RateLimitingInterface
 	informer     cache.Controller
-	nodesClient  client_v1.NodeInterface
+	clientSet    kubernetes.Interface
 	instanceID   string
 	vpcnetConfig *config.Config
 	hostIP       net.IP
+	reconciler   *reconciler
 }
 
 func (c *controller) handleNode(key string) error {
@@ -305,7 +309,7 @@ func (c *controller) handleNode(key string) error {
 	}
 
 	if tainted {
-		c.updateNode(node.Name, func(n *v1.Node) {
+		updateNode(c.clientSet.Core().Nodes(), node.Name, func(n *v1.Node) {
 			keep := []v1.Taint{}
 			for _, t := range n.Spec.Taints {
 				if !(t.Key == taintNoInterface &&
@@ -317,13 +321,40 @@ func (c *controller) handleNode(key string) error {
 		})
 	}
 
+	// if we don't have the reconciler, kick that off
+	if c.reconciler == nil {
+		store, err := diskstore.New(cniconfig.CNIName, "")
+		if err != nil {
+			glog.Fatalf("Error opening diskstore [%+v]", err)
+		}
+		defer store.Close()
+
+		c.reconciler = &reconciler{
+			store:      store,
+			eniMapPath: netconfPath,
+			indexer:    c.indexer,
+			nodeName:   node.Name,
+			clientSet:  c.clientSet,
+		}
+
+		go func() {
+			for {
+				err := c.reconciler.Reconcile()
+				if err != nil {
+					glog.Fatalf("Error reconciling pods to allocations")
+				}
+				time.Sleep(1 * time.Second)
+			}
+		}()
+	}
+
 	return nil
 }
 
 // updateNode will get/update the node until there is no conflict. The passed in
 // function is used as the mutator
-func (c *controller) updateNode(name string, mutator func(node *v1.Node)) error {
-	node, err := c.nodesClient.Get(name, meta_v1.GetOptions{})
+func updateNode(client client_v1.NodeInterface, name string, mutator func(node *v1.Node)) error {
+	node, err := client.Get(name, meta_v1.GetOptions{})
 	if err != nil {
 		return errors.Wrapf(err, "Error fetching node %s to update", node)
 	}
@@ -331,11 +362,11 @@ func (c *controller) updateNode(name string, mutator func(node *v1.Node)) error 
 	for {
 		mutator(node)
 
-		_, err := c.nodesClient.Update(node)
+		_, err := client.Update(node)
 		if api_errors.IsConflict(err) {
 			// Node was modified, fetch and try again
 			glog.V(2).Infof("Conflict updating node %s, retrying", name)
-			node, err := c.nodesClient.Get(name, meta_v1.GetOptions{})
+			node, err = client.Get(name, meta_v1.GetOptions{})
 			if err != nil {
 				return errors.Wrapf(err, "Error fetching node %s to update", node)
 			}
