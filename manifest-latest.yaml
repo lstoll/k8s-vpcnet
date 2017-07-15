@@ -198,6 +198,10 @@ spec:
         # We should run on master too
         - key: "node-role.kubernetes.io/master"
           effect: NoSchedule
+        # It's fine if there's no IPs
+        - key: "k8s-vpcnet/no-free-ips"
+          effect: NoSchedule
+
 ---
 apiVersion: v1
 kind: ServiceAccount

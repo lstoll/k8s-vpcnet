@@ -13,6 +13,8 @@ import (
 
 const cniConfigPath = "/etc/cni/net.d/10-vpcnet.conf"
 
+const CNIName = "vpcnet"
+
 // CNI represents the configuration that our CNI plugin receives
 type CNI struct {
 	Name       string `json:"name"`
@@ -49,7 +51,7 @@ func WriteCNIConfig(c *config.Config) error {
 
 	// Build the config
 	cnicfg := &CNI{
-		Name:       "vpcnet",
+		Name:       CNIName,
 		CNIVersion: version.Current(),
 		Type:       "vpcnet",
 		// Let the paths just use the defaults

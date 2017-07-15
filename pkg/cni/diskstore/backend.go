@@ -113,3 +113,19 @@ func (s *Store) ReleaseByID(id string) ([]net.IP, error) {
 	})
 	return released, err
 }
+
+// Reservations will return all currently reserved IPs
+func (s *Store) Reservations() ([]net.IP, error) {
+	alloced := []net.IP{}
+	err := filepath.Walk(s.dataDir, func(fp string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return nil
+		}
+		ip := net.ParseIP(path.Base(fp))
+		if ip != nil {
+			alloced = append(alloced, ip)
+		}
+		return nil
+	})
+	return alloced, err
+}
