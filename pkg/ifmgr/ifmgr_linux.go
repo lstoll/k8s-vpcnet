@@ -1,4 +1,4 @@
-package main
+package ifmgr
 
 import (
 	"fmt"
@@ -7,18 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/golang/glog"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
 	"github.com/vishvananda/netlink"
+	uiptables "k8s.io/kubernetes/pkg/util/iptables"
 )
 
-const (
-	mtu = 1500
-)
-
-func configureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IPNet) error {
+func (i *IFMgr) ConfigureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IPNet) error {
 	// Find the interface AWS attached
 	ifs, err := netlink.LinkList()
 	if err != nil {
@@ -49,23 +45,10 @@ func configureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IP
 		return errors.Wrapf(err, "Error bringing host interface %q up", hostIf.Attrs().Name)
 	}
 
-	// TODO - drop any routes that are created automatically?
-
-	// Add a source route via this interface
-	/*err = netlink.RouteAdd(&netlink.Route{
-		LinkIndex: hostNLif.Attrs().Index,
-		Dst:       subnet,
-		Scope:     netlink.SCOPE_LINK,
-		Src:       ip.IP,
-	})
-	if err != nil {
-		return glog.Wrapf(err, "Error adding source route to %s on interface %s", subnet.String(), ifname)
-	}*/
-
 	return nil
 }
 
-func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet) error {
+func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet) error {
 	link, err := netlink.LinkByName(ifName)
 	if err != nil {
 		return errors.Wrapf(err, "failed to lookup %q", ifName)
@@ -87,7 +70,7 @@ func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, 
 	routes = append(routes, &netlink.Route{
 		Table:     config.FromPodRTBase + awsEniAttachIndex,
 		LinkIndex: link.Attrs().Index,
-		Dst:       cfg.ServiceCIDR.IPNet(),
+		Dst:       i.Network.ServiceCIDR.IPNet(),
 		//Scope:     netlink.SCOPE_LINK, Direct all service traffic via the
 		// VPC gateway, it can figure stuff out.
 		Scope: netlink.SCOPE_UNIVERSE,
@@ -98,12 +81,12 @@ func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, 
 	routes = append(routes, &netlink.Route{
 		Table:     config.FromPodRTBase + awsEniAttachIndex,
 		LinkIndex: link.Attrs().Index,
-		Dst:       cfg.ClusterCIDR.IPNet(),
+		Dst:       i.Network.ClusterCIDR.IPNet(),
 		Scope:     netlink.SCOPE_UNIVERSE,
 		Gw:        gw,
 	})
 
-	if cfg.PodIPMasq {
+	if i.Network.PodIPMasq {
 		// If we're masquerading, we want non-local interface traffic to leave
 		// the main interface via it's default route, so it'll be masqeraded as
 		// the host. We need to make sure local traffic and service traffic is
@@ -153,72 +136,53 @@ func configureRoutes(cfg *config.Network, ifName string, awsEniAttachIndex int, 
 	return nil
 }
 
-func configureIPMasq(cfg *config.Network, hostIP net.IP, podIPs []net.IP) error {
-	if cfg.PodIPMasq {
-		ipt, err := iptables.NewWithProtocol(iptables.ProtocolIPv4)
+func (i *IFMgr) ConfigureIPMasq(hostIP net.IP, podIPs []net.IP) error {
+	chain := uiptables.Chain("K8S-VPCNET")
+	comment := "k8s-vpcnet generated rules for masquerading outbound pod traffic"
+	multicastNet := &net.IPNet{IP: net.ParseIP("224.0.0.0"), Mask: net.CIDRMask(4, 32)}
+
+	_, err := i.IPTables.EnsureChain(uiptables.TableNAT, chain)
+	if err != nil {
+		return errors.Wrapf(err, "failed to ensure chain %q", chain)
+	}
+
+	// Packets to these network should pass through like normal
+	for _, sn := range []*net.IPNet{i.Network.ClusterCIDR.IPNet(), i.Network.ServiceCIDR.IPNet(), multicastNet} {
+		if _, err := i.IPTables.EnsureRule(uiptables.Append, uiptables.TableNAT, chain, "-d", sn.String(), "-j", "ACCEPT", "-m", "comment", "--comment", comment); err != nil {
+			return errors.Wrap(err, "Error adding skip rule")
+		}
+	}
+
+	// Don't masquerade multicast - pods should be able to talk to other pods
+	// on the local network via multicast.
+	_, err = i.IPTables.EnsureRule(uiptables.Append, uiptables.TableNAT, chain, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
+	if err != nil {
+		return errors.Wrap(err, "Error adding masquerade rull")
+	}
+
+	for _, ip := range podIPs {
+		_, err := i.IPTables.EnsureRule(uiptables.Append, uiptables.TableNAT, uiptables.ChainPostrouting, "-s", ip.String()+"/32", "-j", string(chain), "-m", "comment", "--comment", comment)
 		if err != nil {
-			return errors.Wrap(err, "failed to locate iptables: %v")
+			return errors.Wrapf(err, "Error inserting jump for pod IP %v", ip)
 		}
 
-		chain := "K8S-VPCNET"
-		comment := "k8s-vpcnet generated rules for masquerading outbound pod traffic"
-		multicastNet := &net.IPNet{IP: net.ParseIP("224.0.0.0"), Mask: net.CIDRMask(4, 32)}
-
-		exists := false
-		chains, err := ipt.ListChains("nat")
-		if err != nil {
-			return errors.Wrap(err, "failed to list chains")
-		}
-		for _, ch := range chains {
-			if ch == chain {
-				exists = true
-				break
-			}
-		}
-		if !exists {
-			err = ipt.NewChain("nat", chain)
-			if err != nil {
-				return errors.Wrap(err, "Error creating chain")
-			}
-		}
-
-		// Packets to these network should pass through like normal
-		for _, sn := range []*net.IPNet{cfg.ClusterCIDR.IPNet(), cfg.ServiceCIDR.IPNet(), multicastNet} {
-			if err := ipt.AppendUnique("nat", chain, "-d", sn.String(), "-j", "ACCEPT", "-m", "comment", "--comment", comment); err != nil {
-				return errors.Wrap(err, "Error adding skip rule")
-			}
-		}
-
-		// Don't masquerade multicast - pods should be able to talk to other pods
-		// on the local network via multicast.
-		err = ipt.AppendUnique("nat", chain, "-j", "MASQUERADE", "-m", "comment", "--comment", comment)
-		if err != nil {
-			return errors.Wrap(err, "Error adding masquerade rull")
-		}
-
-		for _, ip := range podIPs {
-			err := ipt.AppendUnique("nat", "POSTROUTING", "-s", ip.String()+"/32", "-j", chain, "-m", "comment", "--comment", comment)
+		if i.Network.InstanceMetadataRedirectPort != 0 {
+			// Redirect instance metadata traffic to this port on the hosts main IP.
+			_, err := i.IPTables.EnsureRule(uiptables.Append, uiptables.TableNAT, uiptables.ChainPrerouting,
+				"-s", ip.String()+"/32", "-d", "169.254.169.254", "-p", "tcp", "--dport", "80",
+				"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", hostIP.String(), i.Network.InstanceMetadataRedirectPort),
+				"-m", "comment", "--comment", comment,
+			)
 			if err != nil {
 				return errors.Wrapf(err, "Error inserting jump for pod IP %v", ip)
 			}
-
-			if cfg.InstanceMetadataRedirectPort != 0 {
-				// Redirect instance metadata traffic to this port on the hosts main IP.
-				err := ipt.AppendUnique("nat", "PREROUTING",
-					"-s", ip.String()+"/32", "-d", "169.254.169.254", "-p", "tcp", "--dport", "80",
-					"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", hostIP.String(), cfg.InstanceMetadataRedirectPort),
-					"-m", "comment", "--comment", comment,
-				)
-				if err != nil {
-					return errors.Wrapf(err, "Error inserting jump for pod IP %v", ip)
-				}
-			}
 		}
 	}
+
 	return nil
 }
 
-func interfaceExists(name string) (bool, error) {
+func (i *IFMgr) InterfaceExists(name string) (bool, error) {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		return false, errors.Wrapf(err, "Error checking for %q existence", name)
