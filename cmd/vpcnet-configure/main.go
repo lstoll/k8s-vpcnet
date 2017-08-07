@@ -14,6 +14,7 @@ import (
 	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
+	"github.com/lstoll/k8s-vpcnet/pkg/ifmgr"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/lstoll/k8s-vpcnet/version"
 	"github.com/pkg/errors"
@@ -31,6 +32,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
+	udbus "k8s.io/kubernetes/pkg/util/dbus"
+	uiptables "k8s.io/kubernetes/pkg/util/iptables"
+	uexec "k8s.io/utils/exec"
 )
 
 var (
@@ -47,56 +51,23 @@ const taintNoIPs = "k8s-vpcnet/no-free-ips"
 func main() {
 	flag.Set("logtostderr", "true")
 
-	var mode, ifname, mac, ip, cb string
-
-	flag.StringVar(&mode, "mode", "kubernetes-auto", "Mode to run in. Default is normal on-cluster, or manual can be specified to configure directly")
-
-	// Manual
-	flag.StringVar(&mac, "host-mac", "", "[manual] MAC address of the ENI")
-	flag.StringVar(&ifname, "interface-name", "", "[manual] name for the interface")
-	flag.StringVar(&ip, "ip", "", "[manual] IP address for the bridge")
-	flag.StringVar(&cb, "cidr-block", "", "[manual] VPC Subnet CIDR block (e.g 10.0.0.0/8")
-
-	// Kubernetes
 	flag.StringVar(&netconfPath, "netconf-path", vpcnetstate.DefaultENIMapPath, "[kubernetes] Path to write the netconf for CNI IPAM")
 
 	flag.Parse()
 
-	switch mode {
-	case "kubernetes-auto":
-		cfg, err := config.Load(config.DefaultConfigPath)
-		if err != nil {
-			log.Fatalf("Error loading configuration [%+v]", err)
-		}
-		glog.Info("Installing CNI deps")
-		err = installCNI(cfg)
-		if err != nil {
-			log.Fatalf("Error installing CNI deps [%v]", err)
-		}
-		glog.Info("Running node configurator in on-cluster mode")
-		runk8s(cfg)
-		// TODO Poll for current running pods, delete lock files for gone pods.
-		// Should we just loop http://localhost:10255/pods/  ({"kind":"PodList"})
-	case "manual":
-		if mac == "" || ifname == "" || ip == "" || cb == "" {
-			glog.Fatal("All args required in manual mode")
-		}
-		glog.Info("Configuring interfaces directly")
-		_, subnet, err := net.ParseCIDR(cb)
-		if err != nil {
-			glog.Fatalf("Error parsing subnet cidr [%v]", err)
-		}
-		ifip := &net.IPNet{
-			IP:   net.ParseIP(ip),
-			Mask: subnet.Mask,
-		}
-		err = configureInterface(ifname, mac, ifip, subnet)
-		if err != nil {
-			glog.Fatalf("Error configuring interface [%v]", err)
-		}
-	default:
-		glog.Fatalf("Invalid mode %q specified", mode)
+	cfg, err := config.Load(config.DefaultConfigPath)
+	if err != nil {
+		log.Fatalf("Error loading configuration [%+v]", err)
 	}
+	glog.Info("Installing CNI deps")
+	err = installCNI(cfg)
+	if err != nil {
+		log.Fatalf("Error installing CNI deps [%v]", err)
+	}
+	glog.Info("Running node configurator in on-cluster mode")
+	runk8s(cfg)
+	// TODO Poll for current running pods, delete lock files for gone pods.
+	// Should we just loop http://localhost:10255/pods/  ({"kind":"PodList"})
 }
 
 func runk8s(vpcnetConfig *config.Config) {
@@ -184,6 +155,8 @@ func runk8s(vpcnetConfig *config.Config) {
 		},
 	}, cache.Indexers{})
 
+	ipt := uiptables.New(uexec.New(), udbus.New(), uiptables.ProtocolIpv4)
+
 	// Run up the controller
 	c := &controller{
 		indexer:      indexer,
@@ -193,6 +166,7 @@ func runk8s(vpcnetConfig *config.Config) {
 		vpcnetConfig: vpcnetConfig,
 		hostIP:       hostIP,
 		clientSet:    clientset,
+		IFMgr:        ifmgr.New(vpcnetConfig.Network, ipt),
 	}
 
 	stop := make(chan struct{})
@@ -212,6 +186,7 @@ type controller struct {
 	vpcnetConfig *config.Config
 	hostIP       net.IP
 	reconciler   *reconciler
+	IFMgr        *ifmgr.IFMgr
 }
 
 func (c *controller) handleNode(key string) error {
@@ -249,7 +224,7 @@ func (c *controller) handleNode(key string) error {
 	for _, config := range nc {
 		if config.Attached {
 			glog.V(2).Infof("Node %s has interface %s attached with MAC %s at index %d", node.Name, config.EniID, config.MACAddress, config.Index)
-			exists, err := interfaceExists(config.InterfaceName())
+			exists, err := c.IFMgr.InterfaceExists(config.InterfaceName())
 			if err != nil {
 				return err
 			}
@@ -259,14 +234,13 @@ func (c *controller) handleNode(key string) error {
 					IP:   config.InterfaceIP,
 					Mask: config.CIDRBlock.Mask,
 				}
-				err = configureInterface(config.InterfaceName(), config.MACAddress, ipn, config.CIDRBlock.IPNet())
+				err = c.IFMgr.ConfigureInterface(config.InterfaceName(), config.MACAddress, ipn, config.CIDRBlock.IPNet())
 				if err != nil {
 					glog.Errorf("Error configuring interface %s on node %s [%+v]", config.InterfaceName(), node.Name, err)
 					return err
 				}
 
-				err = configureRoutes(
-					c.vpcnetConfig.Network,
+				err = c.IFMgr.ConfigureRoutes(
 					config.InterfaceName(),
 					config.Index,
 					config.CIDRBlock.IPNet(),
@@ -276,8 +250,7 @@ func (c *controller) handleNode(key string) error {
 					return errors.Wrapf(err, "Error configuring routes for interface %s on node %s", config.InterfaceName(), node.Name)
 				}
 
-				err = configureIPMasq(
-					c.vpcnetConfig.Network,
+				err = c.IFMgr.ConfigureIPMasq(
 					c.hostIP,
 					config.IPs,
 				)
