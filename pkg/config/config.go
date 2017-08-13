@@ -73,6 +73,9 @@ type Network struct {
 	// InstanceMetadataRedirectPort is the port on the machines main IP we
 	// should redirect all instance metadata traffic to. Use with kube2iam
 	InstanceMetadataRedirectPort int `toml:"instance_metadata_redirect_port"`
+	// HostPrimaryInterface is the name of the main interface in the machine,
+	// i.e what masq should egress. If not set, inferred from metadata API.
+	HostPrimaryInterface string `toml:"host_primary_interface"`
 }
 
 // Logging is the master configuration for this app. It is updated from a ConfigMap
