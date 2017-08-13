@@ -59,11 +59,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error loading configuration [%+v]", err)
 	}
+
 	glog.Info("Installing CNI deps")
 	err = installCNI(cfg)
 	if err != nil {
 		log.Fatalf("Error installing CNI deps [%v]", err)
 	}
+
 	glog.Info("Running node configurator in on-cluster mode")
 	runk8s(cfg)
 	// TODO Poll for current running pods, delete lock files for gone pods.
@@ -82,6 +84,15 @@ func runk8s(vpcnetConfig *config.Config) {
 		glog.Fatalf("Error determining host IP address [%+v]", err)
 	}
 	hostIP := net.ParseIP(hostIPStr)
+
+	if vpcnetConfig.Network.HostPrimaryInterface == "" {
+		glog.V(2).Info("Finding host primary interface")
+		vpcnetConfig.Network.HostPrimaryInterface, err = primaryInterface(md)
+		if err != nil {
+			glog.Fatalf("Error finding host's primary interface [%+v]", err)
+		}
+		glog.V(2).Infof("Primary interface is %q", vpcnetConfig.Network.HostPrimaryInterface)
+	}
 
 	// creates the in-cluster config
 	config, err := rest.InClusterConfig()
@@ -425,4 +436,30 @@ func (c *controller) Run(threadiness int, stopCh chan struct{}) {
 func (c *controller) runWorker() {
 	for c.processNextItem() {
 	}
+}
+
+func primaryInterface(md *ec2metadata.EC2Metadata) (string, error) {
+	mac, err := md.GetMetadata("mac")
+	if err != nil {
+		return "", errors.Wrap(err, "Error finding interface MAC")
+	}
+
+	ifs, err := net.Interfaces()
+	if err != nil {
+		return "", errors.Wrap(err, "Error listing machine interfaces")
+	}
+
+	var ifName string
+
+	for _, i := range ifs {
+		if i.HardwareAddr.String() == mac {
+			ifName = i.Name
+		}
+	}
+
+	if ifName == "" {
+		return "", fmt.Errorf("Could not find interface name for MAC %q", mac)
+	}
+
+	return ifName, nil
 }

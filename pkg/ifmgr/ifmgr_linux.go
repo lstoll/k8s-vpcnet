@@ -93,9 +93,9 @@ func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet 
 		// still pushed out the eni
 
 		// TODO - have this configured, or inferred smarter?
-		eth0, err := netlink.LinkByName("eth0")
+		eth0, err := netlink.LinkByName(i.Network.HostPrimaryInterface)
 		if err != nil {
-			return errors.Wrap(err, "failed to lookup eth0")
+			return errors.Wrapf(err, "failed to lookup %q", i.Network.HostPrimaryInterface)
 		}
 
 		routes = append(routes, &netlink.Route{
