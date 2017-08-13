@@ -407,7 +407,8 @@ func (c *controller) handleErr(err error, key interface{}) {
 	c.queue.Forget(key)
 	// Report to an external entity that, even after several retries, we could not successfully process this key
 	runtimeutil.HandleError(err)
-	glog.Infof("Dropping node %q out of the queue: %v", key, err)
+
+	glog.Fatalf("Repeated errors processing node %q [%+v]", key, err)
 }
 
 func (c *controller) Run(threadiness int, stopCh chan struct{}) {
