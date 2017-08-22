@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
@@ -20,6 +21,9 @@ import (
 )
 
 func TestReconciler(t *testing.T) {
+	defer func(omd time.Duration) { missingDelay = omd }(missingDelay)
+	missingDelay = time.Duration(0)
+
 	var podsData []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(podsData)
@@ -163,15 +167,19 @@ func TestReconciler(t *testing.T) {
 			}
 
 			r := &reconciler{
-				store:     ds,
-				indexer:   newIndexer(testNode),
-				nodeName:  "test-node",
-				clientSet: fake.NewSimpleClientset(apiObjs...),
+				store:        ds,
+				indexer:      newIndexer(testNode),
+				nodeName:     "test-node",
+				clientSet:    fake.NewSimpleClientset(apiObjs...),
+				missingSince: map[string]time.Time{},
 			}
 
-			err = r.Reconcile()
-			if err != nil {
-				t.Fatalf("Error calling Reconcile [%+v]", err)
+			// run a few times to stabilize
+			for i := 0; i < 10; i++ {
+				err = r.Reconcile()
+				if err != nil {
+					t.Fatalf("Error calling Reconcile [%+v]", err)
+				}
 			}
 
 			stillReserved, err := ds.Reservations()

@@ -314,10 +314,11 @@ func (c *controller) handleNode(key string) error {
 		defer store.Close()
 
 		c.reconciler = &reconciler{
-			store:     store,
-			indexer:   c.indexer,
-			nodeName:  node.Name,
-			clientSet: c.clientSet,
+			store:        store,
+			indexer:      c.indexer,
+			nodeName:     node.Name,
+			clientSet:    c.clientSet,
+			missingSince: map[string]time.Time{},
 		}
 
 		go func() {
