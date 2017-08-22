@@ -87,7 +87,6 @@ spec:
           effect: NoSchedule
         - key: "k8s-vpcnet/no-free-ips"
           effect: NoSchedule
-      hostNetwork: true
 ---
 apiVersion: v1
 kind: ServiceAccount
