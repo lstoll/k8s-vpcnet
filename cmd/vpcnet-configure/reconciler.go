@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cenk/backoff"
@@ -14,10 +15,14 @@ import (
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
+	api_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 )
+
+// missingDelay is the time a pod has to not show in output before freeing address
+var missingDelay = 5 * time.Minute
 
 // podsURL is the URL to fetch node pods from the kubelet insecure port
 var podsURL = "http://localhost:10255/pods"
@@ -29,6 +34,9 @@ type reconciler struct {
 	indexer   cache.Indexer
 	nodeName  string
 	clientSet kubernetes.Interface
+
+	missingSince   map[string]time.Time
+	missingSinceMu sync.Mutex
 }
 
 // Reconcile will check the pods on this node vs. the allocated IP addresses,
@@ -36,6 +44,9 @@ type reconciler struct {
 // exhausted, it will taint the node as NoFreeIPs and evict any pods that are
 // bound but have no IPs
 func (r *reconciler) Reconcile() error {
+	r.missingSinceMu.Lock()
+	defer r.missingSinceMu.Unlock()
+
 	podList, err := fetchPodList()
 	if err != nil {
 		return errors.Wrap(err, "Error fetching pod list")
@@ -56,11 +67,17 @@ func (r *reconciler) Reconcile() error {
 				found = true
 			}
 		}
-		if !found {
-			glog.Infof("Dangling reservation found for %s, freeing", ip.String())
-			err := r.store.Release(ip)
-			if err != nil {
-				return errors.Wrapf(err, "Error releasing IP %v", ip)
+		if found {
+			delete(r.missingSince, ip.String())
+		} else {
+			since, ok := r.missingSince[ip.String()]
+			if ok && since.Add(missingDelay).Before(time.Now()) {
+				err := r.store.Release(ip)
+				if err != nil {
+					return errors.Wrapf(err, "Error releasing IP %v", ip)
+				}
+			} else if !ok {
+				r.missingSince[ip.String()] = time.Now()
 			}
 		}
 	}
@@ -128,7 +145,7 @@ func (r *reconciler) Reconcile() error {
 			glog.Infof("Deleting oversubscribed pod %s.%s", p.Namespace, p.Name)
 			// TODO - is just killing the pods the best path forward?
 			err = r.clientSet.Core().Pods(p.Namespace).Delete(p.Name, &meta_v1.DeleteOptions{})
-			if err != nil {
+			if err != nil && !api_errors.IsNotFound(err) {
 				return errors.Wrapf(err, "Error deleting pod %q from namespace %q", p.Name, p.Namespace)
 			}
 		}
