@@ -70,6 +70,9 @@ type Network struct {
 	// PodIPMasq indicated if we should masquerade external pod traffic from the
 	// hosts's main interface
 	PodIPMasq bool `toml:"pod_ip_masq"`
+	// VPCRouted are additional addresses to route via the VPC subnet gateway,
+	// rather than via the host's IP.
+	VPCRouted []*IPNet `toml:"vpc_routed"`
 	// InstanceMetadataRedirectPort is the port on the machines main IP we
 	// should redirect all instance metadata traffic to. Use with kube2iam
 	InstanceMetadataRedirectPort int `toml:"instance_metadata_redirect_port"`

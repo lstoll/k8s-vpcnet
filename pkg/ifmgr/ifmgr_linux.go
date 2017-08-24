@@ -105,6 +105,17 @@ func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet 
 			Scope:     netlink.SCOPE_LINK,
 		})
 
+		// route the extra networks via the ENI gateway
+		for _, an := range i.Network.VPCRouted {
+			routes = append(routes, &netlink.Route{
+				Table:     config.FromPodRTBase + awsEniAttachIndex,
+				LinkIndex: link.Attrs().Index,
+				Dst:       an.IPNet(),
+				Scope:     netlink.SCOPE_UNIVERSE,
+				Gw:        gw,
+			})
+		}
+
 		routes = append(routes, &netlink.Route{
 			Table:     config.FromPodRTBase + awsEniAttachIndex,
 			LinkIndex: eth0.Attrs().Index,
@@ -147,7 +158,11 @@ func (i *IFMgr) ConfigureIPMasq(hostIP net.IP, podIPs []net.IP) error {
 	}
 
 	// Packets to these network should pass through like normal
-	for _, sn := range []*net.IPNet{i.Network.ClusterCIDR.IPNet(), i.Network.ServiceCIDR.IPNet(), multicastNet} {
+	nonmasqNets := []*net.IPNet{i.Network.ClusterCIDR.IPNet(), i.Network.ServiceCIDR.IPNet(), multicastNet}
+	for _, an := range i.Network.VPCRouted {
+		nonmasqNets = append(nonmasqNets, an.IPNet())
+	}
+	for _, sn := range nonmasqNets {
 		if _, err := i.IPTables.EnsureRule(uiptables.Append, uiptables.TableNAT, chain, "-d", sn.String(), "-j", "ACCEPT", "-m", "comment", "--comment", comment); err != nil {
 			return errors.Wrap(err, "Error adding skip rule")
 		}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/containernetworking/plugins/pkg/ns"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
+	"github.com/vishvananda/netlink"
 	udbus "k8s.io/kubernetes/pkg/util/dbus"
 	uiptables "k8s.io/kubernetes/pkg/util/iptables"
 	uexec "k8s.io/utils/exec"
@@ -28,7 +29,9 @@ func TestConfigureIPMasq(t *testing.T) {
 		ClusterCIDR:                  &config.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(20, 32)},
 		ServiceCIDR:                  &config.IPNet{IP: net.ParseIP("100.64.0.0"), Mask: net.CIDRMask(18, 32)},
 		PodIPMasq:                    true,
+		VPCRouted:                    []*config.IPNet{{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(8, 32)}},
 		InstanceMetadataRedirectPort: 8181,
+		HostPrimaryInterface:         "eth0",
 	}
 	ipt := uiptables.New(uexec.New(), udbus.New(), uiptables.ProtocolIpv4)
 
@@ -50,12 +53,32 @@ func TestConfigureIPMasq(t *testing.T) {
 			defer hostNS.Close()
 
 			err = hostNS.Do(func(ns.NetNS) error {
+				t.Log("Creating eth0")
+				d := &netlink.Dummy{
+					LinkAttrs: netlink.LinkAttrs{
+						Name: "eth0",
+					},
+				}
+				if err := netlink.LinkAdd(d); err != nil {
+					t.Fatalf("Error creating dummy interface [%+v]", err)
+				}
+				if err := netlink.AddrAdd(d, &netlink.Addr{IPNet: &net.IPNet{IP: net.ParseIP("10.0.0.5"), Mask: net.CIDRMask(18, 32)}, Label: ""}); err != nil {
+					t.Fatalf("Could not add addr to dummy interface [%+v]", err)
+				}
+				if err := netlink.LinkSetUp(d); err != nil {
+					t.Fatalf("Error bringing dummy interface up [%+v]", err)
+				}
+
 				t.Log("Running configurator")
 
-				err := ifmgr.ConfigureIPMasq(net.ParseIP("1.2.3.4"), []net.IP{net.ParseIP("192.168.99.5")})
-
+				err = ifmgr.ConfigureRoutes("eth0", 0, &net.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(16, 32)})
 				if err != nil {
-					t.Fatalf("Error calling configureIPMasq [%+v]", err)
+					t.Fatalf("Error calling ConfigureRoutes [%+v]", err)
+				}
+
+				err = ifmgr.ConfigureIPMasq(net.ParseIP("1.2.3.4"), []net.IP{net.ParseIP("192.168.99.5")})
+				if err != nil {
+					t.Fatalf("Error calling ConfigureIPMasq [%+v]", err)
 				}
 
 				return nil

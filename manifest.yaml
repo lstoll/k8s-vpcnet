@@ -16,6 +16,10 @@ data:
     # main interface. Generally this will be desired, unless you have a NAT
     # Gateway set on the subnet the pods reside in.
     pod_ip_masq = true
+    # If we're masquerading traffic, additional subnets that should be routed
+    # via the VPC subnet's gateway, rather than masqueraded from the host.
+    # Generally this will be things that you peer to etc.
+    vpc_routed = [ "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16" ]
     # Where we should redirect traffic destined for the instance metadata
     # endpoint. Calls to it will be rewrote to the machines main IP on the
     # specified port. Intended for use with https://github.com/jtblin/kube2iam .
