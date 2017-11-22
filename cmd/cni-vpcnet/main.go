@@ -119,6 +119,7 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 
 	store, err := diskstore.New(conf.Name, conf.DataDir)
 	if err != nil {
+		glog.Errorf("Error opening disk store [%+v]", err)
 		return err
 	}
 	defer store.Close()
@@ -130,12 +131,13 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 
 	released, err := alloc.Release(args.ContainerID)
 	if err != nil {
-		glog.Errorf("Error releasing IP address for container %s [%+v]", args.ContainerID, err)
-		return errors.Wrap(err, "Error releasing IP")
+		glog.Errorf("Error releasing IP address for container %s, ignoring [%+v]", args.ContainerID, err)
 	}
 
 	if args.Netns != "" {
-		c.vether.TeardownVeth(conf, em, args.Netns, args.IfName, released)
+		if err := c.vether.TeardownVeth(conf, em, args.Netns, args.IfName, released); err != nil {
+			glog.Errorf("Error tearing down veth for container %s, ignoring [%+v]", args.ContainerID, err)
+		}
 	} else {
 		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
 	}
