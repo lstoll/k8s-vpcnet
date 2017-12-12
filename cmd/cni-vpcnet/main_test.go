@@ -38,6 +38,19 @@ var testMap = vpcnetstate.ENIs{
 		},
 		MACAddress: "0a:3e:1f:4e:c6:d2",
 	},
+	&vpcnetstate.ENI{
+		EniID:       "eni-5d232b8e",
+		Attached:    true,
+		InterfaceIP: net.ParseIP("10.0.8.97"),
+		CIDRBlock:   &config.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(20, 32)},
+		Index:       1,
+		IPs: []net.IP{
+			net.ParseIP("10.0.10.42"),
+			net.ParseIP("10.0.15.233"),
+			net.ParseIP("10.0.15.26"),
+		},
+		MACAddress: "0a:3e:1f:4e:c6:dd",
+	},
 }
 
 func (v *testVether) SetupVeth(cfg *cniconfig.CNI, em vpcnetstate.ENIs, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {

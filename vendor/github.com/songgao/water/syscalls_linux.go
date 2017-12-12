@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	cIFF_TUN   = 0x0001
-	cIFF_TAP   = 0x0002
-	cIFF_NO_PI = 0x1000
+	cIFF_TUN         = 0x0001
+	cIFF_TAP         = 0x0002
+	cIFF_NO_PI       = 0x1000
+	cIFF_MULTI_QUEUE = 0x0100
 )
 
 type ifReq struct {
@@ -21,7 +22,7 @@ type ifReq struct {
 	pad   [0x28 - 0x10 - 2]byte
 }
 
-func ioctl(fd uintptr, request int, argp uintptr) error {
+func ioctl(fd uintptr, request uintptr, argp uintptr) error {
 	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(request), argp)
 	if errno != 0 {
 		return os.NewSyscallError("ioctl", errno)
@@ -34,7 +35,13 @@ func newTAP(config Config) (ifce *Interface, err error) {
 	if err != nil {
 		return nil, err
 	}
-	name, err := createInterface(file.Fd(), config.Name, cIFF_TAP|cIFF_NO_PI)
+
+	var flags uint16
+	flags = cIFF_TAP | cIFF_NO_PI
+	if config.PlatformSpecificParams.MultiQueue {
+		flags |= cIFF_MULTI_QUEUE
+	}
+	name, err := createInterface(file.Fd(), config.Name, flags)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +59,13 @@ func newTUN(config Config) (ifce *Interface, err error) {
 	if err != nil {
 		return nil, err
 	}
-	name, err := createInterface(file.Fd(), config.Name, cIFF_TUN|cIFF_NO_PI)
+
+	var flags uint16
+	flags = cIFF_TUN | cIFF_NO_PI
+	if config.PlatformSpecificParams.MultiQueue {
+		flags |= cIFF_MULTI_QUEUE
+	}
+	name, err := createInterface(file.Fd(), config.Name, flags)
 	if err != nil {
 		return nil, err
 	}

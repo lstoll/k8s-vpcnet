@@ -169,7 +169,7 @@ func main() {
 		},
 	}, cache.Indexers{})
 
-	nodesClient := clientset.Nodes()
+	nodesClient := clientset.CoreV1().Nodes()
 
 	sess := session.Must(session.NewSession())
 	md := ec2metadata.New(sess)

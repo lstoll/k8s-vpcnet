@@ -21,9 +21,7 @@ import (
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/selection"
 	runtimeutil "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
@@ -113,30 +111,24 @@ func runk8s(vpcnetConfig *config.Config) {
 	// 	fields.OneTermEqualSelector("aws-instance-id", iid),
 	// )
 
-	selector := labels.NewSelector()
-	iidReq, err := labels.NewRequirement("aws-instance-id", selection.Equals, []string{iid})
-	if err != nil {
-		glog.Fatalf("Instance ID label selector is not valid [%+v]", err)
-	}
-	selector = selector.Add(*iidReq)
-
 	listFunc := func(options meta_v1.ListOptions) (runtime.Object, error) {
+		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
+
 		return clientset.Core().RESTClient().Get().
 			Namespace(v1.NamespaceAll).
 			Resource("nodes").
 			VersionedParams(&options, meta_v1.ParameterCodec).
-			LabelsSelectorParam(selector).
 			Do().
 			Get()
 	}
 
 	watchFunc := func(options meta_v1.ListOptions) (watch.Interface, error) {
 		options.Watch = true
+		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
 		return clientset.Core().RESTClient().Get().
 			Namespace(v1.NamespaceAll).
 			Resource("nodes").
 			VersionedParams(&options, meta_v1.ParameterCodec).
-			LabelsSelectorParam(selector).
 			Watch()
 	}
 	lw := &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
