@@ -11,6 +11,16 @@ import (
 	"github.com/pkg/errors"
 )
 
+func cniConfigured() (bool, error) {
+	if _, err := os.Stat(cniconfig.CNIConfigPath); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, errors.Wrap(err, "Error checking CNI config path")
+	}
+	return true, nil
+}
+
 func installCNI(cfg *config.Config) error {
 	err := os.MkdirAll("/opt/cni/bin", 0755)
 	if err != nil {
