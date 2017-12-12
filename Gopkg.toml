@@ -1,3 +1,7 @@
+required = [
+  "github.com/containernetworking/plugins/plugins/main/loopback"
+]
+
 [[constraint]]
   name = "github.com/BurntSushi/toml"
   version = "0.3.0"
@@ -12,11 +16,11 @@
 
 [[constraint]]
   name = "github.com/containernetworking/cni"
-  version = "0.6.0"
+  version = "~0.6.0"
 
 [[constraint]]
   name = "github.com/containernetworking/plugins"
-  version = "0.6.0"
+  version = "~0.6.0"
 
 [[constraint]]
   branch = "master"
