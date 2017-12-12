@@ -19,11 +19,6 @@ import (
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	// noInterfaceTaint is the key used on the taint before the node has an interface
-	taintNoInterface = "k8s-vpcnet/no-interface-configured"
-)
-
 // handleNode is the business logic of the controller.
 func (c *Controller) handleNode(key string) error {
 	obj, exists, err := c.indexer.GetByKey(key)
@@ -128,19 +123,11 @@ func (c *Controller) handleNode(key string) error {
 		nc = vpcnetstate.ENIs{}
 	}
 
-	// if we have to congfiguration, taint the node that we don't ASAP to avoid
-	// pods being scheuled on the node. We should ensure our configuration
-	// daemonset tolerates this. Also label the node with the instance ID, to
-	// facilitate the node agents watch
-	if len(nc) == 0 && !hasTaint(node, taintNoInterface, v1.TaintEffectNoSchedule) {
-		glog.Infof("Node %s has no configuration, tainting with %s", node.Name, taintNoInterface)
+	// Also label the node with the instance ID, to facilitate the node agents
+	// watching for their own node, rather than all of them
+	if _, ok := node.Labels["aws-instance-id"]; !ok {
+		glog.Infof("Node %s has no aws-instance-id label, adding", node.Name)
 		err = c.updateNode(node.Name, func(n *v1.Node) {
-			n.Spec.Taints = append(n.Spec.Taints,
-				v1.Taint{
-					Key:    taintNoInterface,
-					Effect: v1.TaintEffectNoSchedule,
-				},
-			)
 			n.Labels["aws-instance-id"] = node.Spec.ExternalID
 		})
 		if err != nil {
