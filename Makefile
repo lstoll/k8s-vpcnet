@@ -21,7 +21,7 @@ build:
 	$(GOBUILD) -o build/bin/vpcnet ./cmd/cni-vpcnet
 
 test:
-	go test -v $$(go list ./... | grep -v /vendor/)
+	go test -v ./...
 
 lint:
 	GOOS=linux GOARCH=amd64 gometalinter --config=.gometalinter.cfg.json --deadline=1200s ./...
