@@ -39,9 +39,6 @@ var (
 	netconfPath string
 )
 
-// noInterfaceTaint is the key used on the taint before the node has an interface
-const taintNoInterface = "k8s-vpcnet/no-interface-configured"
-
 // taintNoIPs is applied to the node when there are no free IPs for pods.
 // pods with net: host can tolerate this to get scheduled anyway
 const taintNoIPs = "k8s-vpcnet/no-free-ips"
@@ -56,12 +53,6 @@ func main() {
 	cfg, err := config.Load(config.DefaultConfigPath)
 	if err != nil {
 		log.Fatalf("Error loading configuration [%+v]", err)
-	}
-
-	glog.Info("Installing CNI deps")
-	err = installCNI(cfg)
-	if err != nil {
-		log.Fatalf("Error installing CNI deps [%v]", err)
 	}
 
 	glog.Info("Running node configurator in on-cluster mode")
@@ -276,25 +267,17 @@ func (c *controller) handleNode(key string) error {
 
 	// If we get to here, we have a fully configured node. If we have the taint,
 	// remove it.
-	var tainted bool
-	for _, t := range node.Spec.Taints {
-		if t.Key == taintNoInterface &&
-			t.Effect == v1.TaintEffectNoSchedule {
-			tainted = true
-		}
+	cc, err := cniConfigured()
+	if err != nil {
+		glog.Errorf("Error checking if CNI configured [%+v]", err)
+		return errors.Wrap(err, "Error checking if CNI configured")
 	}
 
-	if tainted {
-		updateNode(c.clientSet.Core().Nodes(), node.Name, func(n *v1.Node) {
-			keep := []v1.Taint{}
-			for _, t := range n.Spec.Taints {
-				if !(t.Key == taintNoInterface &&
-					t.Effect == v1.TaintEffectNoSchedule) {
-					keep = append(keep, t)
-				}
-			}
-			n.Spec.Taints = keep
-		})
+	if !cc {
+		glog.Info("Installing & configuring CNI")
+		if err := installCNI(c.vpcnetConfig); err != nil {
+			log.Fatalf("Error installing CNI deps [%v]", err)
+		}
 	}
 
 	// if we don't have the reconciler, kick that off

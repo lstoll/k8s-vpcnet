@@ -15,6 +15,9 @@ const cniConfigPath = "/etc/cni/net.d/10-vpcnet.conf"
 
 const CNIName = "vpcnet"
 
+// CNIConfigPath is where the configuration is written to for CNI
+const CNIConfigPath = "/etc/cni/net.d/10-vpcnet.conf"
+
 // CNI represents the configuration that our CNI plugin receives
 type CNI struct {
 	Name       string `json:"name"`
@@ -66,7 +69,7 @@ func WriteCNIConfig(c *config.Config) error {
 		return errors.Wrap(err, "Error marshaling CNI JSON")
 	}
 
-	err = ioutil.WriteFile("/etc/cni/net.d/10-vpcnet.conf", cniJSON, 0644)
+	err = ioutil.WriteFile(CNIConfigPath, cniJSON, 0644)
 	if err != nil {
 		return errors.Wrap(err, "Error writing CNI configuration JSON")
 	}
