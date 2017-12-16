@@ -18,6 +18,7 @@ build:
 	$(GOBUILD) -o build/bin/eni-controller ./cmd/eni-controller
 	$(GOBUILD) -o build/bin/vpcnet-configure ./cmd/vpcnet-configure
 	$(GOBUILD) -o build/bin/loopback ./vendor/github.com/containernetworking/plugins/plugins/main/loopback
+	$(GOBUILD) -o build/bin/ptp ./vendor/github.com/containernetworking/plugins/plugins/main/ptp
 	$(GOBUILD) -o build/bin/vpcnet ./cmd/cni-vpcnet
 
 test:

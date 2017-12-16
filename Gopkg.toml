@@ -1,5 +1,6 @@
 required = [
-  "github.com/containernetworking/plugins/plugins/main/loopback"
+  "github.com/containernetworking/plugins/plugins/main/loopback",
+  "github.com/containernetworking/plugins/plugins/main/ptp"
 ]
 
 [[constraint]]

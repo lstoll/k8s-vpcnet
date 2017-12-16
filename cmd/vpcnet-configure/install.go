@@ -27,7 +27,7 @@ func installCNI(cfg *config.Config) error {
 		return errors.Wrap(err, "Error creating /opt/cni/bin/")
 	}
 	// copy bins
-	for _, f := range []string{"vpcnet", "loopback"} {
+	for _, f := range []string{"vpcnet", "loopback", "ptp"} {
 		err := CopyFile("/opt/cni/bin/"+f, "/cni/"+f, 0755)
 		if err != nil {
 			return errors.Wrap(err, "Error copying CNI bin "+f)
