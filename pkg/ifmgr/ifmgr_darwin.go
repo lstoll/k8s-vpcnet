@@ -6,7 +6,7 @@ func (i *IFMgr) ConfigureInterface(ifname string, mac string, ip *net.IPNet, sub
 	return nil
 }
 
-func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet) error {
+func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet, podIPs []net.IP) error {
 	return nil
 }
 

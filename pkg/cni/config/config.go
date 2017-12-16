@@ -3,7 +3,6 @@ package config
 import (
 	"encoding/json"
 	"io/ioutil"
-	"net"
 	"os"
 
 	"github.com/containernetworking/cni/pkg/version"
@@ -18,27 +17,23 @@ const CNIName = "vpcnet"
 // CNIConfigPath is where the configuration is written to for CNI
 const CNIConfigPath = "/etc/cni/net.d/10-vpcnet.conf"
 
-// CNI represents the configuration that our CNI plugin receives
-type CNI struct {
+// Net represents the top-level CNI config
+type Net struct {
 	Name       string `json:"name"`
 	CNIVersion string `json:"cniVersion"`
-	// Type is the type of interface plugin in use
-	Type string `json:"type"`
+	Type       string `json:"type"`
+	IPAM       *IPAM  `json:"ipam"`
+}
 
+// IPAM represents the configuration that our CNI plugin receives
+type IPAM struct {
+	// Type of ipam to use, should always be vpcnet
+	Type string `json:"type"`
 	// ENIMapPath is the optional path to read the map from. Otherwise, use default
 	ENIMapPath string `json:"eni_map_path"`
+
 	//DataDir overrides the dir that the plugin will track state in
 	DataDir string `json:"data_dir"`
-
-	// IPMasq will write outbound masquerate iptables rules
-	IPMasq bool `json:"ip_masq"`
-
-	// ClusterCIDR is the CIDR in which pods will run in
-	ClusterCIDR *net.IPNet `json:"cluster_cidr"`
-
-	// ServiceCIDR is the CIDR for the cluster services network. This is needed
-	// to ensure the correct routing for this interface.
-	ServiceCIDR *net.IPNet `json:"service_cidr"`
 
 	// LogLevel is the glog v flag to set
 	LogVerbosity int `json:"log_verbosity"`
@@ -53,15 +48,16 @@ func WriteCNIConfig(c *config.Config) error {
 	}
 
 	// Build the config
-	cnicfg := &CNI{
+	cnicfg := &Net{
 		Name:       CNIName,
 		CNIVersion: version.Current(),
-		Type:       "vpcnet",
-		// Let the paths just use the defaults
-		IPMasq:       c.Network.PodIPMasq,
-		ServiceCIDR:  c.Network.ServiceCIDR.IPNet(),
-		ClusterCIDR:  c.Network.ClusterCIDR.IPNet(),
-		LogVerbosity: c.Logging.CNIVLevel,
+		// Type is always ptp
+		Type: "ptp",
+		IPAM: &IPAM{
+			Type:         "vpcnet",
+			LogVerbosity: c.Logging.CNIVLevel,
+			// Let the paths just use the defaults
+		},
 	}
 
 	cniJSON, err := json.Marshal(cnicfg)

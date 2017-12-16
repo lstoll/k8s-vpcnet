@@ -12,17 +12,9 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/testutils"
-	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
-
-type testVether struct {
-	hostIf        *current.Interface
-	contIf        *current.Interface
-	setupErr      error
-	teardownError error
-}
 
 var testMap = vpcnetstate.ENIs{
 	&vpcnetstate.ENI{
@@ -53,19 +45,8 @@ var testMap = vpcnetstate.ENIs{
 	},
 }
 
-func (v *testVether) SetupVeth(cfg *cniconfig.CNI, em vpcnetstate.ENIs, contnsPath, ifName string, net *podNet) (*current.Interface, *current.Interface, error) {
-	return v.hostIf, v.contIf, v.setupErr
-}
-
-func (v *testVether) TeardownVeth(cfg *cniconfig.CNI, em vpcnetstate.ENIs, nspath, ifname string, released []net.IP) error {
-	return v.teardownError
-}
-
 func TestMain(t *testing.T) {
-	tv := &testVether{}
-	runner := &cniRunner{
-		vether: tv,
-	}
+	runner := &cniRunner{}
 	workDir, err := ioutil.TempDir("", "")
 	if err != nil {
 		t.Fatal(err)
@@ -94,9 +75,12 @@ func TestMain(t *testing.T) {
 	cniJSON := fmt.Sprintf(`{
 		"cniVersion": "0.3.1",
 		"name": "vpcnet",
-		"type": "vpcnet",
-		"data_dir": "%s",
-		"eni_map_path": "%s"
+		"type": "ptp",
+		"ipam": {
+			"type": "vpcnet",
+			"data_dir": "%s",
+			"eni_map_path": "%s"
+		}
 	}`, dataDir, eniMapPath)
 
 	args := &skel.CmdArgs{
@@ -104,14 +88,6 @@ func TestMain(t *testing.T) {
 		Netns:       nsPath,
 		IfName:      ifName,
 		StdinData:   []byte(cniJSON),
-	}
-
-	tv.contIf = &current.Interface{
-		Name: "eth0",
-	}
-
-	tv.hostIf = &current.Interface{
-		Name: "veth123456",
 	}
 
 	// Allocate the IP

@@ -18,27 +18,10 @@ import (
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 )
 
-type podNet struct {
-	// ContainerIP is the IP to allocate to the container
-	ContainerIP net.IP
-	// ENIIp is the address of the ENI interface on the host
-	ENIIp net.IPNet
-	// ENIInterface is the host interface for the ENI
-	ENIInterface string
-	// ENI Subnet is the CIDR net the ENI lives in
-	ENISubnet *net.IPNet
-	// ENI is the ENI the pod will be associated with.
-	ENI *vpcnetstate.ENI
-}
-
-type cniRunner struct {
-	vether vether
-}
+type cniRunner struct{}
 
 func main() {
-	r := &cniRunner{
-		vether: &vetherImpl{},
-	}
+	r := &cniRunner{}
 	skel.PluginMain(r.cmdAdd, r.cmdDel, version.All)
 }
 
@@ -51,51 +34,51 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 	initGlog(conf)
 	defer glog.Flush()
 
-	store, err := diskstore.New(conf.Name, conf.DataDir)
+	store, err := diskstore.New(conf.Name, conf.IPAM.DataDir)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
 
 	alloc := &ipAllocator{
-		conf:   conf,
+		name:   conf.Name,
+		conf:   conf.IPAM,
 		store:  store,
 		eniMap: em,
 	}
 
-	alloced, err := alloc.Get(args.ContainerID)
+	alloced, eni, err := alloc.Get(args.ContainerID)
 	if err != nil {
 		glog.Errorf("Error allocating IP address for container %s [%+v]", args.ContainerID, err)
 		return err
 	}
 
 	glog.V(2).Infof(
-		"Allocated IP %q on eni %q for container ID %q namespace %q",
-		alloced.ContainerIP,
-		alloced.ENIInterface,
+		"Allocated IP %q for container ID %q namespace %q",
+		alloced.String(),
 		args.ContainerID,
 		args.Netns,
 	)
 
-	hostIf, containerIf, err := c.vether.SetupVeth(conf, em, args.Netns, args.IfName, alloced)
+	// TODO - does DNS matter in the Kubernetes case? Maybe.
+
+	_, defNet, err := net.ParseCIDR("0.0.0.0/0")
 	if err != nil {
-		glog.Errorf("Error setting up interface for container %s [%+v]", args.ContainerID, err)
-		return err
+		return errors.Wrap(err, "Unexpected error parsing 0.0.0.0/0 !!!")
 	}
 
-	glog.V(2).Infof(
-		"Created host interface %q container interface %q for container ID %q namespace %q",
-		hostIf.Name,
-		containerIf.Name,
-		args.ContainerID,
-		args.Netns,
-	)
-
 	result := &current.Result{
-		Interfaces: []*current.Interface{hostIf, containerIf},
 		IPs: []*current.IPConfig{
 			{
-				Address: net.IPNet{IP: alloced.ContainerIP, Mask: net.CIDRMask(32, 32)},
+				Address: net.IPNet{IP: alloced, Mask: eni.Mask},
+				Gateway: eni.IP,
+			},
+		},
+		Routes: []*types.Route{
+			// Always return a route for 0.0.0.0/0, the configurator will handle
+			// where this actually ends up on the host side.
+			{
+				Dst: *defNet,
 			},
 		},
 	}
@@ -109,7 +92,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 }
 
 func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
-	conf, em, err := loadConfig(args.StdinData)
+	conf, _, err := loadConfig(args.StdinData)
 	if err != nil {
 		return err
 	}
@@ -117,7 +100,7 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	initGlog(conf)
 	defer glog.Flush()
 
-	store, err := diskstore.New(conf.Name, conf.DataDir)
+	store, err := diskstore.New(conf.Name, conf.IPAM.DataDir)
 	if err != nil {
 		glog.Errorf("Error opening disk store [%+v]", err)
 		return err
@@ -125,33 +108,27 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	defer store.Close()
 
 	alloc := &ipAllocator{
-		conf:  conf,
+		name:  conf.Name,
+		conf:  conf.IPAM,
 		store: store,
 	}
 
-	released, err := alloc.Release(args.ContainerID)
+	_, err = alloc.Release(args.ContainerID)
 	if err != nil {
+		// Note error, but continue anyway
 		glog.Errorf("Error releasing IP address for container %s, ignoring [%+v]", args.ContainerID, err)
-	}
-
-	if args.Netns != "" {
-		if err := c.vether.TeardownVeth(conf, em, args.Netns, args.IfName, released); err != nil {
-			glog.Errorf("Error tearing down veth for container %s, ignoring [%+v]", args.ContainerID, err)
-		}
-	} else {
-		glog.Warningf("Skipping delete of interface for container %q, netns is empty", args.ContainerID)
 	}
 
 	return nil
 }
 
-func loadConfig(dat []byte) (*config.CNI, vpcnetstate.ENIs, error) {
-	cfg := &config.CNI{}
+func loadConfig(dat []byte) (*config.Net, vpcnetstate.ENIs, error) {
+	cfg := &config.Net{}
 	err := json.Unmarshal(dat, cfg)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "Error unmarshaling Net")
 	}
-	mp := cfg.ENIMapPath
+	mp := cfg.IPAM.ENIMapPath
 	if mp == "" {
 		mp = vpcnetstate.DefaultENIMapPath
 	}
@@ -163,8 +140,8 @@ func loadConfig(dat []byte) (*config.CNI, vpcnetstate.ENIs, error) {
 	return cfg, em, nil
 }
 
-func initGlog(cfg *config.CNI) {
+func initGlog(cfg *config.Net) {
 	flag.Set("logtostderr", "true")
-	flag.Set("v", strconv.Itoa(cfg.LogVerbosity))
+	flag.Set("v", strconv.Itoa(cfg.IPAM.LogVerbosity))
 	flag.Parse()
 }

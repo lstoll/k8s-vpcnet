@@ -205,18 +205,6 @@
   version = "v0.8.0"
 
 [[projects]]
-  branch = "master"
-  name = "github.com/songgao/packets"
-  packages = ["ethernet"]
-  revision = "549a10cd4091c1e78542d3bb357036299cb9fcd6"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/songgao/water"
-  packages = ["."]
-  revision = "dc106b419556b93288adff21fe0c86e8c9b10f9b"
-
-[[projects]]
   name = "github.com/spf13/pflag"
   packages = ["."]
   revision = "e57e3eeb33f795204c1ca35f56c44f83227c6e66"
@@ -243,7 +231,7 @@
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
-  packages = ["unix","windows","windows/registry"]
+  packages = ["unix"]
   revision = "53aa286056ef226755cd898109dbcdaba8ac0b81"
 
 [[projects]]
@@ -303,6 +291,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "84b36825f6e743125dcf39f7fc9ffe582392dfa05bc1ab29670d39c8d47d328c"
+  inputs-digest = "7558db123e78d93894da1c554eda95eb51259a89198a6faf315dcd3992b80a18"
   solver-name = "gps-cdcl"
   solver-version = 1

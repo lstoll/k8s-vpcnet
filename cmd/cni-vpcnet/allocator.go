@@ -19,7 +19,8 @@ var ErrEmptyPool = errors.New("No free private IPs found on interface")
 
 // IPAllocator is the implementation of the actual allocator
 type ipAllocator struct {
-	conf   *config.CNI
+	name   string
+	conf   *config.IPAM
 	store  *diskstore.Store
 	eniMap vpcnetstate.ENIs
 }
@@ -29,8 +30,8 @@ type ifFreeIPs struct {
 	ips    []net.IP
 }
 
-// Get returns newly allocated IP along with its config
-func (a *ipAllocator) Get(id string) (*podNet, error) {
+// Get returns newly allocated IP along with the ENI address (and subnet mask).
+func (a *ipAllocator) Get(id string) (alloced net.IP, eniAddr *net.IPNet, err error) {
 	a.store.Lock()
 	defer a.store.Unlock()
 
@@ -40,13 +41,13 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	}
 
 	if len(ips) == 0 {
-		return nil, ErrEmptyPool
+		return nil, nil, ErrEmptyPool
 	}
 
 	// Sort to ensure consistent ordering, for handling last used etc.
 	sort.Sort(netIps(ips))
 
-	lastReservedIP, err := a.store.LastReservedIP(a.conf.Name)
+	lastReservedIP, err := a.store.LastReservedIP(a.name)
 	if err != nil || lastReservedIP == nil {
 		// Likely no last reserved. Just start from the beginning
 	} else {
@@ -61,9 +62,9 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	// Walk until we find a free IPs
 	var reservedIP net.IP
 	for _, ip := range ips {
-		reserved, err := a.store.Reserve(id, ip, a.conf.Name)
+		reserved, err := a.store.Reserve(id, ip, a.name)
 		if err != nil {
-			return nil, errors.Wrap(err, "Error reserving IP in store")
+			return nil, nil, errors.Wrap(err, "Error reserving IP in store")
 		}
 		if reserved {
 			reservedIP = ip
@@ -72,7 +73,7 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 	}
 
 	if reservedIP == nil {
-		return nil, fmt.Errorf("Could not allocate IP for network %s", a.conf.Name)
+		return nil, nil, fmt.Errorf("Could not allocate IP for network %s", a.name)
 	}
 
 	// Find the ENI that has this
@@ -89,13 +90,10 @@ func (a *ipAllocator) Get(id string) (*podNet, error) {
 		panic("Internal state issue - could not find ENI for IP that came from ENI list")
 	}
 
-	return &podNet{
-		ContainerIP:  reservedIP,
-		ENIIp:        net.IPNet{IP: eni.InterfaceIP, Mask: eni.CIDRBlock.Mask},
-		ENIInterface: eni.InterfaceName(),
-		ENISubnet:    eni.CIDRBlock.IPNet(),
-		ENI:          eni,
-	}, nil
+	eniNet := eni.CIDRBlock.IPNet()
+	eniNet.IP = eni.InterfaceIP
+
+	return reservedIP, eniNet, nil
 }
 
 // Release releases all IPs allocated for the container with given ID, and
