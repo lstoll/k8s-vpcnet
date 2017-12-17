@@ -9,8 +9,6 @@ import (
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
 	"github.com/lstoll/k8s-vpcnet/pkg/allocator"
-	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
-	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/ifmgr"
 	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
@@ -35,7 +33,6 @@ type controller struct {
 	instanceID   string
 	vpcnetConfig *config.Config
 	hostIP       net.IP
-	reconciler   *reconciler
 	IFMgr        *ifmgr.IFMgr
 	Allocator    *allocator.Allocator
 }
@@ -136,33 +133,6 @@ func (c *controller) handleNode(key string) error {
 		if err := installCNI(c.vpcnetConfig); err != nil {
 			log.Fatalf("Error installing CNI deps [%v]", err)
 		}
-	}
-
-	// if we don't have the reconciler, kick that off
-	if c.reconciler == nil {
-		store, err := diskstore.New(cniconfig.CNIName, "")
-		if err != nil {
-			glog.Fatalf("Error opening diskstore [%+v]", err)
-		}
-		defer store.Close()
-
-		c.reconciler = &reconciler{
-			store:        store,
-			indexer:      c.indexer,
-			nodeName:     node.Name,
-			clientSet:    c.clientSet,
-			missingSince: map[string]time.Time{},
-		}
-
-		go func() {
-			for {
-				err := c.reconciler.Reconcile()
-				if err != nil {
-					glog.Fatalf("Error reconciling pods to allocations")
-				}
-				time.Sleep(1 * time.Second)
-			}
-		}()
 	}
 
 	return nil
