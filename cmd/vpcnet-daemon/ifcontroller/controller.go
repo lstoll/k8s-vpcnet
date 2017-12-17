@@ -5,7 +5,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/cenk/backoff"
 	"github.com/golang/glog"
 	"github.com/lstoll/k8s-vpcnet/pkg/allocator"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
@@ -14,12 +13,9 @@ import (
 	"github.com/lstoll/k8s-vpcnet/version"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
-	api_errors "k8s.io/apimachinery/pkg/api/errors"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimeutil "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	client_v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
@@ -158,38 +154,6 @@ func (c *Controller) handleNode(key string) error {
 		}
 	}
 
-	return nil
-}
-
-// updateNode will get/update the node until there is no conflict. The passed in
-// function is used as the mutator
-func updateNode(client client_v1.NodeInterface, name string, mutator func(node *v1.Node)) error {
-	node, err := client.Get(name, meta_v1.GetOptions{})
-	if err != nil {
-		return errors.Wrapf(err, "Error fetching node %s to update", node)
-	}
-	bo := backoff.NewExponentialBackOff()
-	for {
-		mutator(node)
-
-		_, err := client.Update(node)
-		if api_errors.IsConflict(err) {
-			// Node was modified, fetch and try again
-			glog.V(2).Infof("Conflict updating node %s, retrying", name)
-			node, err = client.Get(name, meta_v1.GetOptions{})
-			if err != nil {
-				return errors.Wrapf(err, "Error fetching node %s to update", node)
-			}
-		} else if err != nil {
-			return errors.Wrapf(err, "Error updating node %s", name)
-		} else {
-			break
-		}
-
-		time.Sleep(bo.NextBackOff())
-		// TODO - prevent indefinite loops?
-	}
-	glog.V(2).Infof("Node %s updated", name)
 	return nil
 }
 

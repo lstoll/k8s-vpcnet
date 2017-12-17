@@ -10,8 +10,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const cniConfigPath = "/etc/cni/net.d/10-vpcnet.conf"
-
+// CNIName is the name of the CNI plugin
 const CNIName = "vpcnet"
 
 // CNIConfigPath is where the configuration is written to for CNI
