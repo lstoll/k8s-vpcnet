@@ -64,6 +64,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
 	ic := vpcnetpb.NewIPAMClient(conn)
 
@@ -139,6 +140,7 @@ func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 
 	ic := vpcnetpb.NewIPAMClient(conn)
 
