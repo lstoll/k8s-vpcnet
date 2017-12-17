@@ -5,6 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"strings"
+
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetpb"
+	"google.golang.org/grpc"
 
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -30,8 +35,13 @@ import (
 // pods with net: host can tolerate this to get scheduled anyway
 const taintNoIPs = "k8s-vpcnet/no-free-ips"
 
+var (
+	ipamSocketPath string
+)
+
 func main() {
 	flag.Set("logtostderr", "true")
+	flag.StringVar(&ipamSocketPath, "ipam-socket-path", "/var/lib/cni/vpcnet/ipam.sock", "Path for IPAM gRPC Service Socket")
 	flag.Parse()
 
 	cfg, err := config.Load(config.DefaultConfigPath)
@@ -40,12 +50,7 @@ func main() {
 	}
 
 	glog.Info("Running node configurator")
-	runk8s(cfg)
-	// TODO Poll for current running pods, delete lock files for gone pods.
-	// Should we just loop http://localhost:10255/pods/  ({"kind":"PodList"})
-}
 
-func runk8s(vpcnetConfig *config.Config) {
 	sess := session.Must(session.NewSession())
 	md := ec2metadata.New(sess)
 	iid, err := md.GetMetadata("instance-id")
@@ -58,13 +63,13 @@ func runk8s(vpcnetConfig *config.Config) {
 	}
 	hostIP := net.ParseIP(hostIPStr)
 
-	if vpcnetConfig.Network.HostPrimaryInterface == "" {
+	if cfg.Network.HostPrimaryInterface == "" {
 		glog.V(2).Info("Finding host primary interface")
-		vpcnetConfig.Network.HostPrimaryInterface, err = primaryInterface(md)
+		cfg.Network.HostPrimaryInterface, err = primaryInterface(md)
 		if err != nil {
 			glog.Fatalf("Error finding host's primary interface [%+v]", err)
 		}
-		glog.V(2).Infof("Primary interface is %q", vpcnetConfig.Network.HostPrimaryInterface)
+		glog.V(2).Infof("Primary interface is %q", cfg.Network.HostPrimaryInterface)
 	}
 
 	glog.Info("Setting up Allocator")
@@ -73,7 +78,38 @@ func runk8s(vpcnetConfig *config.Config) {
 		glog.Fatalf("Error setting up allocator [%+v]", err)
 	}
 
-	// creates the in-cluster config
+	glog.Info("Starting IPAM Server")
+
+	ipmsvc := &IPAMService{
+		Allocator: alloc,
+	}
+
+	_, err = os.Stat(ipamSocketPath)
+	if err == nil {
+		err = os.Remove(ipamSocketPath)
+		if err != nil {
+			glog.Warningf("Error removing ipam socket [%+v]", err)
+		}
+	}
+	ulis, err := net.Listen("unix", ipamSocketPath)
+	if err != nil {
+		glog.Fatalf("Error listening on IPAM socket [%+v]", err)
+	}
+	if err := os.Chmod(ipamSocketPath, 0600); err != nil {
+		glog.Fatalf("Error setting IPAM socket permissions [%+v]", err)
+	}
+	us := grpc.NewServer()
+	vpcnetpb.RegisterIPAMServer(us, ipmsvc)
+
+	go func() {
+		if err := us.Serve(ulis); err != nil {
+			if !strings.Contains(err.Error(), "use of closed network connection") {
+				glog.Fatalf("IPAM Server Serve error [%+v]", err)
+			}
+		}
+	}()
+
+	// Setting up Kubernetes API configuration
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		glog.Fatalf("Error getting client config [%v]", err)
@@ -147,10 +183,10 @@ func runk8s(vpcnetConfig *config.Config) {
 		queue:        queue,
 		informer:     informer,
 		instanceID:   iid,
-		vpcnetConfig: vpcnetConfig,
+		vpcnetConfig: cfg,
 		hostIP:       hostIP,
 		clientSet:    clientset,
-		IFMgr:        ifmgr.New(vpcnetConfig.Network, ipt),
+		IFMgr:        ifmgr.New(cfg.Network, ipt),
 		Allocator:    alloc,
 	}
 
