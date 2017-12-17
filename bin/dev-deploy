@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+version=dev-$(date '+%Y-%m-%d-%H-%M-%S')
+
+workdir=`mktemp -d`
+
+function cleanup {
+  rm -rf "$workdir"
+}
+trap cleanup EXIT
+
+echo "--> Pushing containers"
+make release VERSION=$version
+
+echo "--> Deploying vpcnet"
+cat manifest.yaml | sed -e "s/{{\\.VersionTag}}/${version}/g" > "$workdir/manifest.yaml"
+kubectl --insecure-skip-tls-verify --kubeconfig ~/.kube/kubecluster.conf -n kube-system apply -f "$workdir/manifest.yaml"
+
+echo "--> Deploying test nginx and shell container"
+cat << EOF | kubectl --insecure-skip-tls-verify --kubeconfig ~/.kube/kubecluster.conf apply -f -
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                      - nginx
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: nginx
+        image: nginx:1.7.9
+        ports:
+        - containerPort: 80
+EOF
+
+cat << EOF | kubectl --insecure-skip-tls-verify --kubeconfig ~/.kube/kubecluster.conf apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nginx
+EOF
+
+cat << EOF | kubectl --insecure-skip-tls-verify --kubeconfig ~/.kube/kubecluster.conf apply -f -
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: debugtools
+spec:
+  selector:
+    matchLabels:
+      app: debugtools
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: debugtools
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                      - debugtools
+              topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: debugtools
+        image: lstoll/debugtools
+        command:
+            - /bin/sleep
+            - infinity
+EOF
+
+echo 'INFO: Can attach to a debug tools pod with `kubectl --insecure-skip-tls-verify --kubeconfig ~/.kube/kubecluster.conf exec -it <pod> -- /bin/bash`'
+
+echo "--> Cycling nodes only"
+kubecluster cluster cycle nodes --fast
