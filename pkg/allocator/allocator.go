@@ -146,21 +146,22 @@ func (a *Allocator) Allocate(containerID, podName, podNamspace string) (*Allocat
 	}
 
 	// Add an allocation entry
-	a.state.Allocations[reservedIP.String()] = Allocation{
+	allocation := Allocation{
+		IP:           reservedIP,
+		ENIIP:        eni.InterfaceIP,
+		ENISubnet:    *eni.CIDRBlock.IPNet(),
 		ContainerID:  containerID,
 		PodName:      podName,
 		PodNamespace: podNamspace,
 	}
 
+	a.state.Allocations[reservedIP.String()] = allocation
+
 	if err := a.state.Write(); err != nil {
 		return nil, errors.Wrap(err, "Error writing state")
 	}
 
-	return &Allocation{
-		IP:        reservedIP,
-		ENIIP:     eni.InterfaceIP,
-		ENISubnet: *eni.CIDRBlock.IPNet(),
-	}, nil
+	return &allocation, nil
 }
 
 // ReleaseByContainer will free the IP allocated to the given container
