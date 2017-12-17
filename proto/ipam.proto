@@ -12,7 +12,8 @@ service IPAM {
 
 message AddRequest {
     string ContainerID = 1;
-    string PodID = 2;
+    string PodName = 2;
+    string PodNamespace = 3;
 }
 
 message AddResponse {

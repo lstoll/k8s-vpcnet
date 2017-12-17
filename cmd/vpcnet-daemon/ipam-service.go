@@ -17,9 +17,9 @@ type IPAMService struct {
 }
 
 func (i *IPAMService) Add(ctx context.Context, req *vpcnetpb.AddRequest) (*vpcnetpb.AddResponse, error) {
-	a, err := i.Allocator.Allocate(req.ContainerID, req.PodID)
+	a, err := i.Allocator.Allocate(req.ContainerID, req.PodName, req.PodNamespace)
 	if err != nil {
-		glog.Errorf("Error calling allocator Allocate for Container %q Pod %q: [%+v}", req.ContainerID, req.PodID, err)
+		glog.Errorf("Error calling allocator Allocate for Container %q Pod %s/%s: [%+v}", req.ContainerID, req.PodNamespace, req.PodName, err)
 		return nil, grpc.Errorf(codes.Internal, "Error allocating address: %q", err.Error())
 	}
 

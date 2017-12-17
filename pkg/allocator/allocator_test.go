@@ -58,13 +58,13 @@ func TestAllocator(t *testing.T) {
 
 	// try allocating and deallocating max addresses
 	for i := 0; i < 6; i++ {
-		_, err := alloc.Allocate(fmt.Sprintf("abc%d", i), fmt.Sprintf("pod-abc%d", i))
+		_, err := alloc.Allocate(fmt.Sprintf("abc%d", i), fmt.Sprintf("pod-abc%d", i), "ns")
 		if err != nil {
 			t.Fatalf("Error getting address %d [%+v]", i, err)
 		}
 	}
 
-	_, err = alloc.Allocate("abc7", "pod-abc7")
+	_, err = alloc.Allocate("abc7", "pod-abc7", "ns")
 	if err == nil {
 		t.Fatal("Expected error allocating 7th address")
 	}
@@ -79,14 +79,14 @@ func TestAllocator(t *testing.T) {
 
 	// Allocate 3 more
 	for i := 10; i < 13; i++ {
-		_, err := alloc.Allocate(fmt.Sprintf("abc%d", i), fmt.Sprintf("pod-abc%d", i))
+		_, err := alloc.Allocate(fmt.Sprintf("abc%d", i), fmt.Sprintf("pod-abc%d", i), "ns")
 		if err != nil {
 			t.Fatalf("Error getting address %d [%+v]", i, err)
 		}
 	}
 
 	// extra alloc should fail
-	_, err = alloc.Allocate("abc17", "pod-abc17")
+	_, err = alloc.Allocate("abc17", "pod-abc17", "ns")
 	if err == nil {
 		t.Fatal("Expected error allocating extra address")
 	}

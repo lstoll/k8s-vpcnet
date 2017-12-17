@@ -34,7 +34,7 @@ func installCNI(cfg *config.Config) error {
 		}
 	}
 
-	err = cniconfig.WriteCNIConfig(cfg)
+	err = cniconfig.WriteCNIConfig(cfg, ipamSocketPath)
 	if err != nil {
 		return errors.Wrap(err, "Error writing CNI configuration.")
 	}

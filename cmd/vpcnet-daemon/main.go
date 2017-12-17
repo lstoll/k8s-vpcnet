@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetpb"
@@ -90,6 +91,9 @@ func main() {
 		if err != nil {
 			glog.Warningf("Error removing ipam socket [%+v]", err)
 		}
+	}
+	if err := os.MkdirAll(path.Dir(ipamSocketPath), 0700); err != nil {
+		glog.Fatalf("Error creating IPAM socket dir [%+v]", err)
 	}
 	ulis, err := net.Listen("unix", ipamSocketPath)
 	if err != nil {

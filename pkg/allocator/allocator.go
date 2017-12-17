@@ -31,9 +31,10 @@ type Allocator struct {
 type Allocation struct {
 	// ContainerID is the ID passed in to the CNI plugin for add/delete
 	ContainerID string
-	// PodID is Kubernetes ID for the pod using this allocation
-	PodID string
-
+	// PodName is Kubernetes Name for the pod using this allocation
+	PodName string
+	// PodNamespace is Kubernetes Namespace for the pod using this allocation
+	PodNamespace string
 	// IP is the address that was allocated
 	IP net.IP
 	// ENIIP is the address of the ENI that is the 'parent' of this address
@@ -87,7 +88,7 @@ func (a *Allocator) SetENIs(enis nodestate.ENIs) error {
 	return nil
 }
 
-func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
+func (a *Allocator) Allocate(containerID, podName, podNamspace string) (*Allocation, error) {
 	a.allocatorMu.Lock()
 	defer a.allocatorMu.Unlock()
 
@@ -146,8 +147,9 @@ func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
 
 	// Add an allocation entry
 	a.state.Allocations[reservedIP.String()] = Allocation{
-		ContainerID: containerID,
-		PodID:       podID,
+		ContainerID:  containerID,
+		PodName:      podName,
+		PodNamespace: podNamspace,
 	}
 
 	if err := a.state.Write(); err != nil {
