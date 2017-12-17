@@ -3,10 +3,7 @@ package vpcnetstate
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
-	"os"
-	"path/filepath"
 
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/pkg/errors"
@@ -66,34 +63,6 @@ func ENIConfigFromAnnotations(annotations map[string]string) (ENIs, error) {
 	}
 
 	return nc, nil
-}
-
-// WriteENIMap persists the map to disk
-func WriteENIMap(path string, em ENIs) error {
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
-	b, err := json.Marshal(em)
-	if err != nil {
-		return err
-	}
-	err = ioutil.WriteFile(path, b, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// ReadENIMap loads the map from disk
-func ReadENIMap(path string) (ENIs, error) {
-	b, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	am := ENIs{}
-	err = json.Unmarshal(b, &am)
-	if err != nil {
-		return nil, err
-	}
-	return am, nil
 }
 
 // AWSInstanceInfo represents additional instance metadata that we store on the
