@@ -238,6 +238,7 @@ func (c *controller) handleNode(key string) error {
 					config.InterfaceName(),
 					config.Index,
 					config.CIDRBlock.IPNet(),
+					config.IPs,
 				)
 				if err != nil {
 					glog.Errorf("Error configuring routes for interface %s on node %s [%+v]", config.InterfaceName(), node.Name, err)

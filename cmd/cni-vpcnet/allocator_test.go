@@ -24,21 +24,22 @@ func TestAllocator(t *testing.T) {
 	defer store.Close()
 
 	alloc := &ipAllocator{
+		name:   "tester",
 		eniMap: testMap,
 		store:  store,
-		conf:   &config.CNI{},
+		conf:   &config.IPAM{},
 	}
 
 	// try allocating and deallocating max addresses
 
 	for i := 0; i < 6; i++ {
-		_, err := alloc.Get(fmt.Sprintf("abc%d", i))
+		_, _, err := alloc.Get(fmt.Sprintf("abc%d", i))
 		if err != nil {
 			t.Fatalf("Error getting address %d [%+v]", i, err)
 		}
 	}
 
-	_, err = alloc.Get("abc7")
+	_, _, err = alloc.Get("abc7")
 	if err == nil {
 		t.Fatal("Expected error allocating 7th address")
 	}

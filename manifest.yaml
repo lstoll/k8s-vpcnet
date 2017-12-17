@@ -34,7 +34,9 @@ data:
     cni_v_level = 2
 ---
 apiVersion: extensions/v1beta1
-kind: Deployment
+# Schedule as a daemonset - this will ignore the race where networking isn't
+# ready which will block this coming up and configuring networking
+kind: DaemonSet
 metadata:
   name: eni-controller
   namespace: kube-system
@@ -42,25 +44,17 @@ metadata:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: eni-controller
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: eni-controller
   template:
     metadata:
       labels:
-      #  k8s-addon: cluster-autoscaler.addons.k8s.io
         app: eni-controller
-      annotations:
-        # use this to force deploy updates
-        template/timestamp: "{{.Timestamp}}"
     spec:
       serviceAccountName:  eni-controller
       hostNetwork: true
       containers:
         - name:  eni-controller
           image: lstoll/eni-controller:{{.VersionTag}}
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           args:
             - --v=2
           resources:
@@ -152,16 +146,13 @@ spec:
     metadata:
       labels:
         app: vpcnet-configure
-      annotations:
-        # use this to force deploy updates
-        template/timestamp: "{{.Timestamp}}"
     spec:
       hostNetwork: true
       serviceAccountName: vpcnet-configure
       containers:
         - name: vpcnet-configure
           image: lstoll/vpcnet-configure:{{.VersionTag}}
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           args:
             - --v=4
           envFrom:
@@ -237,3 +228,19 @@ rules:
   - get
   - update
 ---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name:  vpcnet-configure
+  namespace: kube-system
+  labels:
+  #  k8s-addon: cluster-autoscaler.addons.k8s.io
+    app: vpcnet-configure
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name:  vpcnet-configure
+subjects:
+  - kind: ServiceAccount
+    name:  vpcnet-configure
+    namespace: kube-system

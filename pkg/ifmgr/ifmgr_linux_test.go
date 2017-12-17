@@ -71,7 +71,7 @@ func TestConfigureIPMasq(t *testing.T) {
 
 				t.Log("Running configurator")
 
-				err = ifmgr.ConfigureRoutes("eth0", 0, &net.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(16, 32)})
+				err = ifmgr.ConfigureRoutes("eth0", 0, &net.IPNet{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(16, 32)}, []net.IP{net.ParseIP("192.168.99.5")})
 				if err != nil {
 					t.Fatalf("Error calling ConfigureRoutes [%+v]", err)
 				}

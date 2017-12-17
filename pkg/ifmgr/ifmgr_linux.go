@@ -14,6 +14,14 @@ import (
 	uiptables "k8s.io/kubernetes/pkg/util/iptables"
 )
 
+const (
+	// Before defaults
+	dstPrio = 5000
+	// After defaults
+	srcPrio   = 6000
+	mainTable = 254
+)
+
 func (i *IFMgr) ConfigureInterface(ifname string, mac string, ip *net.IPNet, subnet *net.IPNet) error {
 	// Find the interface AWS attached
 	ifs, err := netlink.LinkList()
@@ -48,7 +56,7 @@ func (i *IFMgr) ConfigureInterface(ifname string, mac string, ip *net.IPNet, sub
 	return nil
 }
 
-func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet) error {
+func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet *net.IPNet, podIPs []net.IP) error {
 	link, err := netlink.LinkByName(ifName)
 	if err != nil {
 		return errors.Wrapf(err, "failed to lookup %q", ifName)
@@ -135,7 +143,6 @@ func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet 
 
 	}
 
-	// fromPodRT should default route from via the ENI interface
 	for _, r := range routes {
 		err := netlink.RouteAdd(r)
 		if err != nil {
@@ -144,6 +151,35 @@ func (i *IFMgr) ConfigureRoutes(ifName string, awsEniAttachIndex int, eniSubnet 
 			}
 		}
 	}
+
+	var rules []*netlink.Rule
+
+	// Routing rules to ensure traffic runs through the right interfaces
+	for _, ip := range podIPs {
+		// To rule is higher priority. This ensures that any traffic to a ns on
+		// the local machine runs through the table that the CNI plugin updates,
+		// rather than being forced out the ENI
+		toRule := netlink.NewRule()
+		toRule.Priority = dstPrio
+		toRule.Table = mainTable
+		toRule.Dst = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
+		rules = append(rules, toRule)
+
+		// From rule is lower priority. It ensures that any traffic from the ns
+		// leaves the correct ENI (i.e the one the address belongs to)
+		fromRule := netlink.NewRule()
+		fromRule.Priority = srcPrio
+		fromRule.Table = config.FromPodRTBase + awsEniAttachIndex
+		fromRule.Src = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
+		rules = append(rules, fromRule)
+	}
+
+	for _, r := range rules {
+		if err := netlink.RuleAdd(r); err != nil {
+			return errors.Wrapf(err, "failed to add rule %v", r)
+		}
+	}
+
 	return nil
 }
 
