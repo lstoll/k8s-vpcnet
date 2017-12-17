@@ -12,7 +12,7 @@ import (
 	"github.com/golang/glog"
 	k8svpcnet "github.com/lstoll/k8s-vpcnet"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,7 +48,7 @@ func (c *Controller) handleNode(key string) error {
 	}
 
 	// See if we've stored additional instance data. If not, fetch and set
-	instanceInfo, err := vpcnetstate.AWSInstanceInfoFromAnnotations(node.Annotations)
+	instanceInfo, err := nodestate.AWSInstanceInfoFromAnnotations(node.Annotations)
 	if err != nil {
 		return errors.Wrapf(err, "Error unpacking instance info from annotations on node %s", node.Name)
 	}
@@ -57,7 +57,7 @@ func (c *Controller) handleNode(key string) error {
 		if err != nil {
 			return errors.Wrapf(err, "Error fetching instance for node %s", node.Name)
 		}
-		instanceInfo = &vpcnetstate.AWSInstanceInfo{
+		instanceInfo = &nodestate.AWSInstanceInfo{
 			InstanceType: *inst.InstanceType,
 			SubnetID:     *inst.SubnetId,
 		}
@@ -87,7 +87,7 @@ func (c *Controller) handleNode(key string) error {
 		}
 
 		err = c.updateNode(node.Name, func(n *v1.Node) {
-			n.Annotations[vpcnetstate.EC2InfoKey] = string(iiJSON)
+			n.Annotations[nodestate.EC2InfoKey] = string(iiJSON)
 		})
 		if err != nil {
 			return errors.Wrapf(err, "error writing instance info for node %s", node.Name)
@@ -114,13 +114,13 @@ func (c *Controller) handleNode(key string) error {
 	}
 
 	// Check to see if we have a ENI configuration
-	nc, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
+	nc, err := nodestate.ENIConfigFromAnnotations(node.Annotations)
 	if err != nil {
 		return errors.Wrapf(err, "Error parsing ENI config from annotation for node %s", node.Name)
 	}
 	// If not, start a new empty one
 	if nc == nil {
-		nc = vpcnetstate.ENIs{}
+		nc = nodestate.ENIs{}
 	}
 
 	// Also label the node with the instance ID, to facilitate the node agents
@@ -152,7 +152,7 @@ func (c *Controller) handleNode(key string) error {
 				return err
 			}
 			c.updateNode(node.Name, func(n *v1.Node) {
-				n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
+				n.Annotations[nodestate.IFSKey] = string(ifsJSON)
 			})
 			// and bail out, next watch can take over
 			return nil
@@ -177,7 +177,7 @@ func (c *Controller) handleNode(key string) error {
 			return err
 		}
 		err = c.updateNode(node.Name, func(n *v1.Node) {
-			n.Annotations[vpcnetstate.IFSKey] = string(ifsJSON)
+			n.Annotations[nodestate.IFSKey] = string(ifsJSON)
 		})
 		if err != nil {
 			return errors.Wrapf(err, "Error updating ENI annotation on node %s", node.Name)
@@ -254,7 +254,7 @@ func (c *Controller) getInstance(node *v1.Node) (*ec2.Instance, error) {
 
 // createENI will create a new ENI with the number of IPs noted. It will return
 // the interface definition
-func (c *Controller) createENI(nodeName string, instanceInfo *vpcnetstate.AWSInstanceInfo, numIPs int) (*vpcnetstate.ENI, error) {
+func (c *Controller) createENI(nodeName string, instanceInfo *nodestate.AWSInstanceInfo, numIPs int) (*nodestate.ENI, error) {
 	ceniResp, err := c.ec2Client.CreateNetworkInterface(
 		&ec2.CreateNetworkInterfaceInput{
 			Description:                    aws.String(fmt.Sprintf("K8S ENI for node %s", nodeName)),
@@ -275,7 +275,7 @@ func (c *Controller) createENI(nodeName string, instanceInfo *vpcnetstate.AWSIns
 		}
 	}
 
-	return &vpcnetstate.ENI{
+	return &nodestate.ENI{
 		EniID:       *ceniResp.NetworkInterface.NetworkInterfaceId,
 		Attached:    false,
 		InterfaceIP: net.ParseIP(*ceniResp.NetworkInterface.PrivateIpAddress),
@@ -285,7 +285,7 @@ func (c *Controller) createENI(nodeName string, instanceInfo *vpcnetstate.AWSIns
 }
 
 // attachENI will attach the provided ENI interface to the given node
-func (c *Controller) attachENI(node *v1.Node, eni *vpcnetstate.ENI) error {
+func (c *Controller) attachENI(node *v1.Node, eni *nodestate.ENI) error {
 	if eni.Attached {
 		return fmt.Errorf("Cannot attach %s to %s, it is flagged as being attached", eni.EniID, node.Name)
 	}
@@ -331,7 +331,7 @@ func hasTaint(node *v1.Node, key string, effect v1.TaintEffect) bool {
 }
 
 // numAttached returns the number of attached ENI interfaces
-func numAttached(enis vpcnetstate.ENIs) int {
+func numAttached(enis nodestate.ENIs) int {
 	num := 0
 	for _, eni := range enis {
 		if eni.Attached {

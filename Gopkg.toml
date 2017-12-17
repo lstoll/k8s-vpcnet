@@ -1,6 +1,7 @@
 required = [
   "github.com/containernetworking/plugins/plugins/main/loopback",
-  "github.com/containernetworking/plugins/plugins/main/ptp"
+  "github.com/containernetworking/plugins/plugins/main/ptp",
+  "github.com/golang/protobuf/protoc-gen-go",
 ]
 
 [[constraint]]
@@ -66,6 +67,14 @@ required = [
 [[constraint]]
   branch = "master"
   name = "k8s.io/utils"
+
+[[constraint]]
+  name = "github.com/golang/protobuf"
+  branch = "master"
+
+[[constraint]]
+  name = "google.golang.org/grpc"
+  version = "~1.8.0"
 
 ## Things for client-go
 

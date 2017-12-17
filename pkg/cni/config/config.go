@@ -30,10 +30,7 @@ type IPAM struct {
 	// Type of ipam to use, should always be vpcnet
 	Type string `json:"type"`
 	// ENIMapPath is the optional path to read the map from. Otherwise, use default
-	ENIMapPath string `json:"eni_map_path"`
-
-	//DataDir overrides the dir that the plugin will track state in
-	DataDir string `json:"data_dir"`
+	IPAMSocketPath string `json:"ipam_socket"`
 
 	// LogLevel is the glog v flag to set
 	LogVerbosity int `json:"log_verbosity"`
@@ -41,7 +38,7 @@ type IPAM struct {
 
 // WriteCNIConfig will take the apps master config, and write out the CNI
 // specific config to the default disk location
-func WriteCNIConfig(c *config.Config) error {
+func WriteCNIConfig(c *config.Config, ipamPath string) error {
 	err := os.MkdirAll("/etc/cni/net.d", 0755)
 	if err != nil {
 		return errors.Wrap(err, "Error creating /etc/cni/net.d")
@@ -54,9 +51,9 @@ func WriteCNIConfig(c *config.Config) error {
 		// Type is always ptp
 		Type: "ptp",
 		IPAM: &IPAM{
-			Type:         "vpcnet",
-			LogVerbosity: c.Logging.CNIVLevel,
-			// Let the paths just use the defaults
+			Type:           "vpcnet",
+			IPAMSocketPath: ipamPath,
+			LogVerbosity:   c.Logging.CNIVLevel,
 		},
 	}
 

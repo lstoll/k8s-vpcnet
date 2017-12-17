@@ -3,6 +3,12 @@ go:
   - 1.9
 services:
   - docker
+install:
+  - curl -Lo /tmp/protoc.zip https://github.com/google/protobuf/releases/download/v3.4.0/protoc-3.4.0-linux-x86_64.zip
+  - (cd /tmp && unzip protoc.zip)
+  - mkdir -p ~/bin && mv /tmp/bin/protoc ~/bin
+  - mkdir -p ~/include && cp -R /tmp/include/* ~/include/
+  - export PATH=$HOME/bin:$GOPATH/bin:$PATH
 before_script:
   - docker login -u="$DOCKER_USERNAME" -p="$DOCKER_PASSWORD"
 jobs:

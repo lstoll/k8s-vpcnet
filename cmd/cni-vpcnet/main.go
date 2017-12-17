@@ -1,22 +1,41 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc"
 
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/cni/pkg/version"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/config"
-	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetpb"
 )
+
+// kubeArgs are the kubernetes-specific arguments passed to this CNI plugin
+type kubeArgs struct {
+	types.CommonArgs
+
+	// IP is pod's ip address
+	IP net.IP
+
+	// K8S_POD_NAME is pod's name
+	K8S_POD_NAME types.UnmarshallableString
+
+	// K8S_POD_NAMESPACE is pod's namespace
+	K8S_POD_NAMESPACE types.UnmarshallableString
+
+	// K8S_POD_INFRA_CONTAINER_ID is pod's container id
+	K8S_POD_INFRA_CONTAINER_ID types.UnmarshallableString
+}
 
 type cniRunner struct{}
 
@@ -26,28 +45,36 @@ func main() {
 }
 
 func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
-	conf, em, err := loadConfig(args.StdinData)
+	cfg := &config.Net{}
+	err := json.Unmarshal(args.StdinData, cfg)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Error unmarshaling config")
 	}
 
-	initGlog(conf)
+	ka := &kubeArgs{}
+
+	if err := types.LoadArgs(args.Args, ka); err != nil {
+		return errors.Wrap(err, "Error loading CNI arguments")
+	}
+
+	initGlog(cfg)
 	defer glog.Flush()
 
-	store, err := diskstore.New(conf.Name, conf.IPAM.DataDir)
+	conn, err := ipamConn(cfg.IPAM.IPAMSocketPath)
 	if err != nil {
 		return err
 	}
-	defer store.Close()
+	defer conn.Close()
 
-	alloc := &ipAllocator{
-		name:   conf.Name,
-		conf:   conf.IPAM,
-		store:  store,
-		eniMap: em,
+	ic := vpcnetpb.NewIPAMClient(conn)
+
+	allocReq := &vpcnetpb.AddRequest{
+		ContainerID:  args.ContainerID,
+		PodName:      string(ka.K8S_POD_NAME),
+		PodNamespace: string(ka.K8S_POD_NAMESPACE),
 	}
 
-	alloced, eni, err := alloc.Get(args.ContainerID)
+	allocResp, err := ic.Add(context.Background(), allocReq)
 	if err != nil {
 		glog.Errorf("Error allocating IP address for container %s [%+v]", args.ContainerID, err)
 		return err
@@ -55,7 +82,7 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 
 	glog.V(2).Infof(
 		"Allocated IP %q for container ID %q namespace %q",
-		alloced.String(),
+		allocResp.AllocatedIP,
 		args.ContainerID,
 		args.Netns,
 	)
@@ -67,11 +94,19 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 		return errors.Wrap(err, "Unexpected error parsing 0.0.0.0/0 !!!")
 	}
 
+	_, subnet, err := net.ParseCIDR(allocResp.SubnetCIDR)
+	if err != nil {
+		return errors.Wrapf(err, "Error parsing returned subnet CIDR %s", allocResp.SubnetCIDR)
+	}
+
 	result := &current.Result{
 		IPs: []*current.IPConfig{
 			{
-				Address: net.IPNet{IP: alloced, Mask: eni.Mask},
-				Gateway: eni.IP,
+				Address: net.IPNet{
+					IP:   net.ParseIP(allocResp.AllocatedIP),
+					Mask: subnet.Mask,
+				},
+				Gateway: net.ParseIP(allocResp.ENIIP),
 			},
 		},
 		Routes: []*types.Route{
@@ -92,52 +127,50 @@ func (c *cniRunner) cmdAdd(args *skel.CmdArgs) error {
 }
 
 func (c *cniRunner) cmdDel(args *skel.CmdArgs) error {
-	conf, _, err := loadConfig(args.StdinData)
+	cfg := &config.Net{}
+	err := json.Unmarshal(args.StdinData, cfg)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "Error unmarshaling config")
 	}
 
-	initGlog(conf)
+	initGlog(cfg)
 	defer glog.Flush()
 
-	store, err := diskstore.New(conf.Name, conf.IPAM.DataDir)
+	conn, err := ipamConn(cfg.IPAM.IPAMSocketPath)
 	if err != nil {
-		glog.Errorf("Error opening disk store [%+v]", err)
 		return err
 	}
-	defer store.Close()
+	defer conn.Close()
 
-	alloc := &ipAllocator{
-		name:  conf.Name,
-		conf:  conf.IPAM,
-		store: store,
+	ic := vpcnetpb.NewIPAMClient(conn)
+
+	delReq := &vpcnetpb.DelRequest{
+		ContainerID: args.ContainerID,
 	}
 
-	_, err = alloc.Release(args.ContainerID)
+	_, err = ic.Del(context.Background(), delReq)
 	if err != nil {
-		// Note error, but continue anyway
+		// Note error, but continue anyway - don't spin the container for this
 		glog.Errorf("Error releasing IP address for container %s, ignoring [%+v]", args.ContainerID, err)
 	}
 
 	return nil
 }
 
-func loadConfig(dat []byte) (*config.Net, vpcnetstate.ENIs, error) {
-	cfg := &config.Net{}
-	err := json.Unmarshal(dat, cfg)
+func ipamConn(sockPath string) (*grpc.ClientConn, error) {
+	conn, err := grpc.Dial(sockPath,
+		grpc.WithInsecure(),
+		grpc.WithDialer(dialUnix),
+	)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "Error unmarshaling Net")
-	}
-	mp := cfg.IPAM.ENIMapPath
-	if mp == "" {
-		mp = vpcnetstate.DefaultENIMapPath
-	}
-	em, err := vpcnetstate.ReadENIMap(mp)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "Error loading ENI configuration")
+		return nil, errors.Wrapf(err, "Error connecting to IPAM socket at %s", sockPath)
 	}
 
-	return cfg, em, nil
+	return conn, nil
+}
+
+func dialUnix(addr string, timeout time.Duration) (net.Conn, error) {
+	return net.DialTimeout("unix", addr, timeout)
 }
 
 func initGlog(cfg *config.Net) {
