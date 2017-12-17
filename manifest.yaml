@@ -135,23 +135,23 @@ subjects:
 apiVersion: extensions/v1beta1
 kind: DaemonSet
 metadata:
-  name: vpcnet-configure
+  name: vpcnet-daemon
   namespace: kube-system
   labels:
-    app: vpcnet-configure
+    app: vpcnet-daemon
 spec:
   updateStrategy:
     type: RollingUpdate
   template:
     metadata:
       labels:
-        app: vpcnet-configure
+        app: vpcnet-daemon
     spec:
       hostNetwork: true
-      serviceAccountName: vpcnet-configure
+      serviceAccountName: vpcnet-daemon
       containers:
-        - name: vpcnet-configure
-          image: lstoll/vpcnet-configure:{{.VersionTag}}
+        - name: vpcnet-daemon
+          image: lstoll/vpcnet-daemon:{{.VersionTag}}
           imagePullPolicy: IfNotPresent
           args:
             - --v=4
@@ -205,18 +205,18 @@ kind: ServiceAccount
 metadata:
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
-    app: vpcnet-configure
-  name: vpcnet-configure
+    app: vpcnet-daemon
+  name: vpcnet-daemon
   namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:
-  name: vpcnet-configure
+  name: vpcnet-daemon
   namespace: kube-system
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
-    app: vpcnet-configure
+    app: vpcnet-daemon
 rules:
 - apiGroups:
   - ""
@@ -231,16 +231,16 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
-  name:  vpcnet-configure
+  name:  vpcnet-daemon
   namespace: kube-system
   labels:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
-    app: vpcnet-configure
+    app: vpcnet-daemon
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name:  vpcnet-configure
+  name:  vpcnet-daemon
 subjects:
   - kind: ServiceAccount
-    name:  vpcnet-configure
+    name:  vpcnet-daemon
     namespace: kube-system

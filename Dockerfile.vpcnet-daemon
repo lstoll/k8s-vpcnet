@@ -5,9 +5,9 @@ RUN apk --no-cache add \
     tini \
     iptables
 
-ADD build/bin/vpcnet-configure /bin/
+ADD build/bin/vpcnet-daemon /bin/
 ADD build/bin/vpcnet /cni/
 ADD build/bin/loopback /cni/
 ADD build/bin/ptp /cni/
 
-ENTRYPOINT ["/sbin/tini", "--", "vpcnet-configure"]
+ENTRYPOINT ["/sbin/tini", "--", "vpcnet-daemon"]

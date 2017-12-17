@@ -37,7 +37,7 @@ Only single instance of this should be run in the cluster currently. This will w
 * Allocate the max number of IPs per ENI's to the node
 * Label the node with the instance ID
 
-## vpcnet-configure
+## vpcnet-daemon
 
 This runs as a DaemonSet on all nodes. It installs the CNI plugin on the node. This watches for node changes by the instance ID label. When the node has ENI's and IPs allocated it will create the network interface in the OS, and set up the appropriate routes and iptables entries. It will then write out a config for the CNI plugin
 
