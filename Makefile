@@ -13,13 +13,16 @@ TEMPDIR := $(shell mktemp -d)
 
 all: manifest-latest.yaml build
 
-build:
+build: pkg/vpcnetpb/ipam.pb.go
 	mkdir -p build/bin
 	$(GOBUILD) -o build/bin/eni-controller ./cmd/eni-controller
 	$(GOBUILD) -o build/bin/vpcnet-daemon ./cmd/vpcnet-daemon
 	$(GOBUILD) -o build/bin/loopback ./vendor/github.com/containernetworking/plugins/plugins/main/loopback
 	$(GOBUILD) -o build/bin/ptp ./vendor/github.com/containernetworking/plugins/plugins/main/ptp
 	$(GOBUILD) -o build/bin/vpcnet ./cmd/cni-vpcnet
+
+pkg/vpcnetpb/ipam.pb.go: $(GOPATH)/bin/protoc-gen-go proto/ipam.proto
+	protoc -Iproto --go_out=plugins=grpc:pkg/vpcnetpb proto/ipam.proto
 
 test:
 	go test -v ./...
@@ -49,3 +52,6 @@ release: build containers manifest-latest.yaml
 		docker tag vpcnet-daemon:$(VERSION) lstoll/vpcnet-daemon:latest && \
 		docker push lstoll/vpcnet-daemon:latest; \
 	fi
+
+$(GOPATH)/bin/protoc-gen-go:
+	go install ./vendor/github.com/golang/protobuf/protoc-gen-go

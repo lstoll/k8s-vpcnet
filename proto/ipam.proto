@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package vpcnet;
+
+// IPAM exports CNI IPAM functionality
+service IPAM {
+    rpc Add(AddRequest) returns (AddResponse) {}
+    rpc Del(DelRequest) returns (DelResponse) {}
+}
+
+message AddRequest {
+    string ContainerID = 1;
+    string PodID = 2;
+}
+
+message AddResponse {
+    string AllocatedIP = 1;
+    string ENIIP = 2;
+    string SubnetCIDR = 3;
+}
+
+message DelRequest {
+    string ContainerID = 1;
+}
+
+message DelResponse {}
+
