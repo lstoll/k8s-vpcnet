@@ -29,7 +29,7 @@ func (n *IPNet) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// UnmarshalText will unmarshal this IPNet from CIDR text notation
+// MarshalText will marshal this IPNet to CIDR text notation
 func (n *IPNet) MarshalText() ([]byte, error) {
 	if n == nil {
 		return nil, nil

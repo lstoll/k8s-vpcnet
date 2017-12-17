@@ -319,24 +319,3 @@ func (c *Controller) attachENI(node *v1.Node, eni *nodestate.ENI) error {
 
 	return nil
 }
-
-// hasTaint returns true if node has matching taints
-func hasTaint(node *v1.Node, key string, effect v1.TaintEffect) bool {
-	for _, t := range node.Spec.Taints {
-		if t.Key == key && t.Effect == effect {
-			return true
-		}
-	}
-	return false
-}
-
-// numAttached returns the number of attached ENI interfaces
-func numAttached(enis nodestate.ENIs) int {
-	num := 0
-	for _, eni := range enis {
-		if eni.Attached {
-			num++
-		}
-	}
-	return num
-}

@@ -34,10 +34,6 @@ import (
 	uexec "k8s.io/utils/exec"
 )
 
-// taintNoIPs is applied to the node when there are no free IPs for pods.
-// pods with net: host can tolerate this to get scheduled anyway
-const taintNoIPs = "k8s-vpcnet/no-free-ips"
-
 var (
 	ipamSocketPath string
 	configPath     string

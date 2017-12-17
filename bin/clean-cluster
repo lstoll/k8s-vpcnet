@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+kubectl="kubectl --insecure-skip-tls-verify --kubeconfig $HOME/.kube/kubecluster.conf"
+
+for ns in $($kubectl get namespace --output='jsonpath={.items..metadata.name}'); do
+    if [ "$ns" != "kube-system" ] && [ "$ns" != "kube-public" ]; then
+        echo "Clearing deployments and services from $ns"
+        $kubectl -n $ns delete service --all
+        $kubectl -n $ns delete deployment --all
+    fi
+done

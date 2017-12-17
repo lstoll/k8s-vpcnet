@@ -20,7 +20,7 @@ var ErrEmptyPool = errors.New("No free private IPs found on interface")
 // Allocator is used for managing resource allocations. It can snapshot and
 // restore its state to disk
 type Allocator struct {
-	state *AllocatorState
+	state *State
 
 	// we wrap everything in this, to prevent conflicting allocations and
 	// control access to the allocation map
@@ -51,7 +51,7 @@ func New(statePath string) (*Allocator, error) {
 		sp = DefaultStatePath
 	}
 
-	s := &AllocatorState{}
+	s := &State{}
 
 	if _, err := os.Stat(sp); !os.IsNotExist(err) {
 		b, err := ioutil.ReadFile(sp)

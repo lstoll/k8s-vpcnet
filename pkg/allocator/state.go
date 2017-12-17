@@ -16,10 +16,10 @@ import (
 // specified
 const DefaultStatePath = "/var/lib/cni/vpcnet/state.json"
 
-// AllocatorState represents the working state of the vpcnet IPAM. It tracks the
+// State represents the working state of the vpcnet IPAM. It tracks the
 // current node ENI configuration, as well as what addresses are used and by
 // what Pods. It can be snapshotted/ read from disk
-type AllocatorState struct {
+type State struct {
 	// ENIs represents the ENI interfaces and addresses that are configured on
 	// this node. This it the data that is annotated on the node object
 	ENIs nodestate.ENIs `json:"enis"`
@@ -33,7 +33,7 @@ type AllocatorState struct {
 }
 
 // Write outputs the current state to disk
-func (a *AllocatorState) Write() error {
+func (a *State) Write() error {
 	a.pathMu.Lock()
 	defer a.pathMu.Unlock()
 

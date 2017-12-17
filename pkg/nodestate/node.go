@@ -17,8 +17,8 @@ const DefaultENIMapPath = "/var/lib/cni/vpcnet/eni_map.json"
 // configuration
 const IFSKey = "k8s-vpcnet/eni-interfaces"
 
-// IFSKey is the key for the node annotation we use to persist interface
-// configuration
+// EC2InfoKey is the key for the node annotation we persist instance information
+// under
 const EC2InfoKey = "k8s-vpcnet/ec2-instance-info"
 
 // ENIs is the list of ENI's we store on a node
