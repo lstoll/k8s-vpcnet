@@ -8,11 +8,11 @@ import (
 	"testing"
 
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
 )
 
-var testMap = vpcnetstate.ENIs{
-	&vpcnetstate.ENI{
+var testMap = nodestate.ENIs{
+	{
 		EniID:       "eni-5d232b8d",
 		Attached:    true,
 		InterfaceIP: net.ParseIP("10.0.8.96"),
@@ -25,7 +25,7 @@ var testMap = vpcnetstate.ENIs{
 		},
 		MACAddress: "0a:3e:1f:4e:c6:d2",
 	},
-	&vpcnetstate.ENI{
+	{
 		EniID:       "eni-5d232b8e",
 		Attached:    true,
 		InterfaceIP: net.ParseIP("10.0.8.97"),
@@ -47,14 +47,14 @@ func TestAllocator(t *testing.T) {
 	}
 	defer os.RemoveAll(workDir)
 
-	st, err := vpcnetstate.NewAllocatorState(workDir + "state.json")
+	alloc, err := New(workDir + "state.json")
 	if err != nil {
-		t.Fatalf("Error creating new allocator state [%+v]", err)
+		t.Fatalf("Error creating allocator [%+v]", err)
 	}
 
-	st.ENIs = testMap
-
-	alloc := New(st)
+	if err := alloc.SetENIs(testMap); err != nil {
+		t.Fatalf("Error setting ENIS's on allocator [%+v]", err)
+	}
 
 	// try allocating and deallocating max addresses
 	for i := 0; i < 6; i++ {

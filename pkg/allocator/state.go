@@ -1,4 +1,4 @@
-package vpcnetstate
+package allocator
 
 import (
 	"encoding/json"
@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
 	"github.com/pkg/errors"
 )
 
@@ -20,8 +21,8 @@ const DefaultStatePath = "/var/lib/cni/vpcnet/state.json"
 // what Pods. It can be snapshotted/ read from disk
 type AllocatorState struct {
 	// ENIs represents the ENI interfaces and addresses that are configured on
-	// this node
-	ENIs ENIs `json:"enis"`
+	// this node. This it the data that is annotated on the node object
+	ENIs nodestate.ENIs `json:"enis"`
 	// Allocations are a map of IP addresses to information about the allocation
 	Allocations map[string]Allocation `json:"allocations"`
 	// LastFreeIP is tracked to try and allocate an address far away from this.
@@ -29,44 +30,6 @@ type AllocatorState struct {
 
 	path   string
 	pathMu sync.Mutex
-}
-
-// Allocation represents the information about the consumer of an IP address
-type Allocation struct {
-	// ContainerID is the ID passed in to the CNI plugin for add/delete
-	ContainerID string `json:"namespace"`
-	// PodID is Kubernetes ID for the pod using this allocation
-	PodID string `json:"pod_id"`
-}
-
-// NewAllocatorState returns a AllocatorState preloaded with the current state from statePath.
-// if statePath is empty, the default will be used
-func NewAllocatorState(statePath string) (*AllocatorState, error) {
-	sp := statePath
-	if sp == "" {
-		sp = DefaultStatePath
-	}
-
-	s := &AllocatorState{}
-
-	if _, err := os.Stat(sp); !os.IsNotExist(err) {
-		b, err := ioutil.ReadFile(sp)
-		if err != nil {
-			return nil, errors.Wrap(err, "Error reading existing state")
-		}
-		err = json.Unmarshal(b, s)
-		if err != nil {
-			return nil, errors.Wrap(err, "Error unmarshaling existing state")
-		}
-	}
-
-	s.path = sp
-
-	if s.Allocations == nil {
-		s.Allocations = make(map[string]Allocation)
-	}
-
-	return s, nil
 }
 
 // Write outputs the current state to disk

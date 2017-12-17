@@ -2,11 +2,14 @@ package allocator
 
 import (
 	"bytes"
+	"encoding/json"
+	"io/ioutil"
 	"net"
+	"os"
 	"sort"
 	"sync"
 
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
 	"github.com/pkg/errors"
 )
 
@@ -14,25 +17,74 @@ import (
 // additional IPs attached to the interface
 var ErrEmptyPool = errors.New("No free private IPs found on interface")
 
-// Allocator is used for managing resource allocations.
+// Allocator is used for managing resource allocations. It can snapshot and
+// restore its state to disk
 type Allocator struct {
-	State *vpcnetstate.AllocatorState
+	state *AllocatorState
 
+	// we wrap everything in this, to prevent conflicting allocations and
+	// control access to the allocation map
 	allocatorMu sync.Mutex
 }
 
 // Allocation represents an allocated address and it's associated information
 type Allocation struct {
-	IP        net.IP
-	ENIIP     net.IP
+	// ContainerID is the ID passed in to the CNI plugin for add/delete
+	ContainerID string
+	// PodID is Kubernetes ID for the pod using this allocation
+	PodID string
+
+	// IP is the address that was allocated
+	IP net.IP
+	// ENIIP is the address of the ENI that is the 'parent' of this address
+	ENIIP net.IP
+	// ENISubnet is the subnet the ENI resides in.
 	ENISubnet net.IPNet
 }
 
-// New returns a configured allocator
-func New(s *vpcnetstate.AllocatorState) *Allocator {
-	return &Allocator{
-		State: s,
+// New returns a configured allocator, with an optional state path. If statePath
+// is empty, the default will be used
+func New(statePath string) (*Allocator, error) {
+	sp := statePath
+	if sp == "" {
+		sp = DefaultStatePath
 	}
+
+	s := &AllocatorState{}
+
+	if _, err := os.Stat(sp); !os.IsNotExist(err) {
+		b, err := ioutil.ReadFile(sp)
+		if err != nil {
+			return nil, errors.Wrap(err, "Error reading existing state")
+		}
+		err = json.Unmarshal(b, s)
+		if err != nil {
+			return nil, errors.Wrap(err, "Error unmarshaling existing state")
+		}
+	}
+
+	s.path = sp
+
+	if s.Allocations == nil {
+		s.Allocations = make(map[string]Allocation)
+	}
+
+	return &Allocator{
+		state: s,
+	}, nil
+}
+
+func (a *Allocator) SetENIs(enis nodestate.ENIs) error {
+	a.allocatorMu.Lock()
+	defer a.allocatorMu.Unlock()
+
+	a.state.ENIs = enis
+
+	if err := a.state.Write(); err != nil {
+		return errors.Wrap(err, "Error writing state")
+	}
+
+	return nil
 }
 
 func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
@@ -40,7 +92,7 @@ func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
 	defer a.allocatorMu.Unlock()
 
 	var ips []net.IP
-	for _, eni := range a.State.ENIs {
+	for _, eni := range a.state.ENIs {
 		ips = append(ips, eni.IPs...)
 	}
 
@@ -51,12 +103,12 @@ func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
 	// Sort to ensure consistent ordering, for handling last used etc.
 	sort.Sort(netIps(ips))
 
-	if a.State.LastFreedIP == nil {
+	if a.state.LastFreedIP == nil {
 		// Likely no last reserved. Just start from the beginning
 	} else {
 		// Shuffle IPs so last reserved is at the end
 		for i := 0; i < len(ips); i++ {
-			if ips[i].Equal(a.State.LastFreedIP) {
+			if ips[i].Equal(a.state.LastFreedIP) {
 				ips = append(ips[i+1:], ips[:i+1]...)
 			}
 		}
@@ -66,7 +118,7 @@ func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
 	var reservedIP net.IP
 	for _, ip := range ips {
 		// check if it's already allocated
-		if _, ok := a.State.Allocations[ip.String()]; ok {
+		if _, ok := a.state.Allocations[ip.String()]; ok {
 			continue
 		}
 
@@ -79,8 +131,8 @@ func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
 	}
 
 	// Find the ENI that has this
-	var eni *vpcnetstate.ENI
-	for _, e := range a.State.ENIs {
+	var eni *nodestate.ENI
+	for _, e := range a.state.ENIs {
 		for _, ip := range e.IPs {
 			if ip.Equal(reservedIP) {
 				eni = e
@@ -93,12 +145,12 @@ func (a *Allocator) Allocate(containerID, podID string) (*Allocation, error) {
 	}
 
 	// Add an allocation entry
-	a.State.Allocations[reservedIP.String()] = vpcnetstate.Allocation{
+	a.state.Allocations[reservedIP.String()] = Allocation{
 		ContainerID: containerID,
 		PodID:       podID,
 	}
 
-	if err := a.State.Write(); err != nil {
+	if err := a.state.Write(); err != nil {
 		return nil, errors.Wrap(err, "Error writing state")
 	}
 
@@ -116,18 +168,18 @@ func (a *Allocator) ReleaseByContainer(containerID string) error {
 
 	var relip string
 
-	for ip, state := range a.State.Allocations {
+	for ip, state := range a.state.Allocations {
 		if state.ContainerID == containerID {
 			relip = ip
 		}
 	}
 
 	if relip != "" {
-		delete(a.State.Allocations, relip)
-		a.State.LastFreedIP = net.ParseIP(relip)
+		delete(a.state.Allocations, relip)
+		a.state.LastFreedIP = net.ParseIP(relip)
 	}
 
-	if err := a.State.Write(); err != nil {
+	if err := a.state.Write(); err != nil {
 		return errors.Wrap(err, "Error writing state")
 	}
 

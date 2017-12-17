@@ -1,4 +1,4 @@
-package vpcnetstate
+package nodestate
 
 import (
 	"encoding/json"

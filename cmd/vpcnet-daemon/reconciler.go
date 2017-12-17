@@ -12,7 +12,7 @@ import (
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
@@ -100,7 +100,7 @@ func (r *reconciler) Reconcile() error {
 		return fmt.Errorf("object with key %s [%v] is not a node", r.nodeName, obj)
 	}
 
-	enis, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
+	enis, err := nodestate.ENIConfigFromAnnotations(node.Annotations)
 	if err != nil {
 		return errors.Wrapf(err, "Error reading ENI map from annotations")
 	}

@@ -8,11 +8,12 @@ import (
 
 	"github.com/cenk/backoff"
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/pkg/allocator"
 	cniconfig "github.com/lstoll/k8s-vpcnet/pkg/cni/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/cni/diskstore"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/ifmgr"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
+	"github.com/lstoll/k8s-vpcnet/pkg/nodestate"
 	"github.com/lstoll/k8s-vpcnet/version"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
@@ -36,7 +37,7 @@ type controller struct {
 	hostIP       net.IP
 	reconciler   *reconciler
 	IFMgr        *ifmgr.IFMgr
-	IPAMState    *vpcnetstate.AllocatorState
+	Allocator    *allocator.Allocator
 }
 
 func (c *controller) handleNode(key string) error {
@@ -62,14 +63,14 @@ func (c *controller) handleNode(key string) error {
 	}
 
 	// Check to see if we have a configuration
-	nc, err := vpcnetstate.ENIConfigFromAnnotations(node.Annotations)
+	nc, err := nodestate.ENIConfigFromAnnotations(node.Annotations)
 
 	if nc == nil {
 		glog.Infof("Skipping node %s, has no network configuration", node.Name)
 		return nil
 	}
 
-	configedENIs := vpcnetstate.ENIs{}
+	configedENIs := nodestate.ENIs{}
 
 	for _, config := range nc {
 		if config.Attached {
@@ -116,9 +117,9 @@ func (c *controller) handleNode(key string) error {
 
 	// Update the state of the IPAM to know about this ENI
 	glog.V(2).Infof("Node %s updating IPAM state for %d interfaces", node.Name, len(configedENIs))
-	c.IPAMState.ENIs = configedENIs
-	if err := c.IPAMState.Write(); err != nil {
-		glog.Errorf("Error writing ENI map for %s", node.Name)
+
+	if err := c.Allocator.SetENIs(configedENIs); err != nil {
+		glog.Errorf("Error updating ENIs on Allocator for node %s", node.Name)
 		return err
 	}
 

@@ -9,9 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/pkg/allocator"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/ifmgr"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetstate"
 	"github.com/pkg/errors"
 	"k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,19 +26,12 @@ import (
 	uexec "k8s.io/utils/exec"
 )
 
-var (
-	netconfPath string
-)
-
 // taintNoIPs is applied to the node when there are no free IPs for pods.
 // pods with net: host can tolerate this to get scheduled anyway
 const taintNoIPs = "k8s-vpcnet/no-free-ips"
 
 func main() {
 	flag.Set("logtostderr", "true")
-
-	flag.StringVar(&netconfPath, "netconf-path", vpcnetstate.DefaultENIMapPath, "[kubernetes] Path to write the netconf for CNI IPAM")
-
 	flag.Parse()
 
 	cfg, err := config.Load(config.DefaultConfigPath)
@@ -74,10 +67,10 @@ func runk8s(vpcnetConfig *config.Config) {
 		glog.V(2).Infof("Primary interface is %q", vpcnetConfig.Network.HostPrimaryInterface)
 	}
 
-	glog.Info("Setting up IPAM state")
-	as, err := vpcnetstate.NewAllocatorState("")
+	glog.Info("Setting up Allocator")
+	alloc, err := allocator.New("")
 	if err != nil {
-		glog.Fatalf("Error setting up ipam state [%+v]", err)
+		glog.Fatalf("Error setting up allocator [%+v]", err)
 	}
 
 	// creates the in-cluster config
@@ -158,7 +151,7 @@ func runk8s(vpcnetConfig *config.Config) {
 		hostIP:       hostIP,
 		clientSet:    clientset,
 		IFMgr:        ifmgr.New(vpcnetConfig.Network, ipt),
-		IPAMState:    as,
+		Allocator:    alloc,
 	}
 
 	stop := make(chan struct{})
