@@ -3,13 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path"
-	"strings"
 
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/cniinstall"
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/ifcontroller"
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/ipamsvc"
 	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetpb"
+	"github.com/oklog/run"
 	"google.golang.org/grpc"
 
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
@@ -38,19 +40,23 @@ const taintNoIPs = "k8s-vpcnet/no-free-ips"
 
 var (
 	ipamSocketPath string
+	configPath     string
 )
 
 func main() {
 	flag.Set("logtostderr", "true")
 	flag.StringVar(&ipamSocketPath, "ipam-socket-path", "/var/lib/cni/vpcnet/ipam.sock", "Path for IPAM gRPC Service Socket")
+	flag.StringVar(&configPath, "config-path", config.DefaultConfigPath, "Path to load the configuration file from")
 	flag.Parse()
 
-	cfg, err := config.Load(config.DefaultConfigPath)
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("Error loading configuration [%+v]", err)
+		glog.Fatalf("Error loading configuration [%+v]", err)
 	}
 
-	glog.Info("Running node configurator")
+	glog.Info("Starting vpcnet daemon")
+
+	glog.Info("Determining host information from AWS metadata APIs")
 
 	sess := session.Must(session.NewSession())
 	md := ec2metadata.New(sess)
@@ -73,47 +79,15 @@ func main() {
 		glog.V(2).Infof("Primary interface is %q", cfg.Network.HostPrimaryInterface)
 	}
 
-	glog.Info("Setting up Allocator")
+	glog.Info("Initializing Allocator")
+
 	alloc, err := allocator.New("")
 	if err != nil {
 		glog.Fatalf("Error setting up allocator [%+v]", err)
 	}
 
-	glog.Info("Starting IPAM Server")
+	glog.Info("Initializing Kubernetes API clients")
 
-	ipmsvc := &IPAMService{
-		Allocator: alloc,
-	}
-
-	_, err = os.Stat(ipamSocketPath)
-	if err == nil {
-		err = os.Remove(ipamSocketPath)
-		if err != nil {
-			glog.Warningf("Error removing ipam socket [%+v]", err)
-		}
-	}
-	if err := os.MkdirAll(path.Dir(ipamSocketPath), 0700); err != nil {
-		glog.Fatalf("Error creating IPAM socket dir [%+v]", err)
-	}
-	ulis, err := net.Listen("unix", ipamSocketPath)
-	if err != nil {
-		glog.Fatalf("Error listening on IPAM socket [%+v]", err)
-	}
-	if err := os.Chmod(ipamSocketPath, 0600); err != nil {
-		glog.Fatalf("Error setting IPAM socket permissions [%+v]", err)
-	}
-	us := grpc.NewServer()
-	vpcnetpb.RegisterIPAMServer(us, ipmsvc)
-
-	go func() {
-		if err := us.Serve(ulis); err != nil {
-			if !strings.Contains(err.Error(), "use of closed network connection") {
-				glog.Fatalf("IPAM Server Serve error [%+v]", err)
-			}
-		}
-	}()
-
-	// Setting up Kubernetes API configuration
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		glog.Fatalf("Error getting client config [%v]", err)
@@ -123,14 +97,6 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error getting client [%v]", err)
 	}
-
-	// TODO - how do we just watch a limted node? Do we need the controller to
-	// add a label for the instance id maybe to them maybe, and filter on that?
-	// watchlist := cache.NewListWatchFromClient(
-	// 	clientset.Core().RESTClient(),
-	// 	"nodes", v1.NamespaceAll,
-	// 	fields.OneTermEqualSelector("aws-instance-id", iid),
-	// )
 
 	listFunc := func(options meta_v1.ListOptions) (runtime.Object, error) {
 		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
@@ -179,27 +145,89 @@ func main() {
 		},
 	}, cache.Indexers{})
 
+	glog.Info("Initializing IPTables manager")
 	ipt := uiptables.New(uexec.New(), udbus.New(), uiptables.ProtocolIpv4)
 
-	// Run up the controller
-	c := &controller{
-		indexer:      indexer,
-		queue:        queue,
-		informer:     informer,
-		instanceID:   iid,
-		vpcnetConfig: cfg,
-		hostIP:       hostIP,
-		clientSet:    clientset,
-		IFMgr:        ifmgr.New(cfg.Network, ipt),
-		Allocator:    alloc,
+	glog.Info("Starting run group")
+	var g run.Group
+
+	ipmsvc := &ipamsvc.Service{
+		Allocator: alloc,
 	}
 
-	stop := make(chan struct{})
-	defer close(stop)
-	go c.Run(1, stop)
+	iprun, ipint := ipamService(ipmsvc)
+	g.Add(iprun, ipint)
 
-	// Wait forever
-	select {}
+	c := &ifcontroller.Controller{
+		Indexer:      indexer,
+		Queue:        queue,
+		Informer:     informer,
+		InstanceID:   iid,
+		VPCNetConfig: cfg,
+		HostIP:       hostIP,
+		ClientSet:    clientset,
+		IFMgr:        ifmgr.New(cfg.Network, ipt),
+		Allocator:    alloc,
+		CNIInstaller: &cniinstall.Installer{
+			IPAMSocketPath: ipamSocketPath,
+			Config:         cfg,
+		},
+	}
+
+	ifrun, ifint := ifc(c, 1)
+	g.Add(ifrun, ifint)
+
+	glog.Errorf("Run group terminated by [%+v]", g.Run())
+}
+
+func ipamService(svc vpcnetpb.IPAMServer) (func() error, func(error)) {
+	glog.Info("Starting IPAM Server")
+
+	_, err := os.Stat(ipamSocketPath)
+	if err == nil {
+		err = os.Remove(ipamSocketPath)
+		if err != nil {
+			glog.Warningf("Error removing ipam socket [%+v]", err)
+		}
+	}
+	if err := os.MkdirAll(path.Dir(ipamSocketPath), 0700); err != nil {
+		glog.Fatalf("Error creating IPAM socket dir [%+v]", err)
+	}
+	lis, err := net.Listen("unix", ipamSocketPath)
+	if err != nil {
+		glog.Fatalf("Error listening on IPAM socket [%+v]", err)
+	}
+	if err := os.Chmod(ipamSocketPath, 0600); err != nil {
+		glog.Fatalf("Error setting IPAM socket permissions [%+v]", err)
+	}
+	srv := grpc.NewServer()
+	vpcnetpb.RegisterIPAMServer(srv, svc)
+
+	run := func() error {
+		return srv.Serve(lis)
+	}
+
+	interrupt := func(error) {
+		srv.GracefulStop()
+		lis.Close()
+	}
+
+	return run, interrupt
+}
+
+func ifc(c *ifcontroller.Controller, threadiness int) (func() error, func(error)) {
+	stop := make(chan struct{})
+
+	run := func() error {
+		c.Run(threadiness, stop)
+		return nil
+	}
+
+	interrupt := func(error) {
+		close(stop)
+	}
+
+	return run, interrupt
 }
 
 func primaryInterface(md *ec2metadata.EC2Metadata) (string, error) {
