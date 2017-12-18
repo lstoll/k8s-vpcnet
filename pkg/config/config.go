@@ -53,6 +53,16 @@ type Config struct {
 	Network *Network `toml:"network"`
 	// Logging is where the logging configuration ends up
 	Logging *Logging `toml:"logging"`
+	// TaintWhenNoIPs indicates if we should add a
+	// k8s-vpcnet/no-free-ips:NoSchedule taint to the node when the IP address
+	// allocation pool is empty
+	TaintWhenNoIPs bool `toml:"taint_when_no_ips"`
+	// DeletePodWhenNoIPs will make the allocator delete the pod from the
+	// kubernetes API when a pod IP allocation request fails (running pods
+	// remain untouched. This can help recover from this situation, but assumes
+	// that the user is OK when this happens (and has a mechanism in place for
+	// the pod to be re-created)
+	DeletePodWhenNoIPs bool `toml:"delete_pod_when_no_ips"`
 }
 
 const (

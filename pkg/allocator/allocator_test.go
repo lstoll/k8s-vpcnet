@@ -56,6 +56,10 @@ func TestAllocator(t *testing.T) {
 		t.Fatalf("Error setting ENIS's on allocator [%+v]", err)
 	}
 
+	if alloc.FreeAddressCount() != 6 {
+		t.Errorf("Expected 6 free addresses, got %d", alloc.FreeAddressCount())
+	}
+
 	// try allocating and deallocating max addresses
 	for i := 0; i < 6; i++ {
 		_, err := alloc.Allocate(fmt.Sprintf("abc%d", i), fmt.Sprintf("pod-abc%d", i), "ns")
@@ -64,9 +68,13 @@ func TestAllocator(t *testing.T) {
 		}
 	}
 
+	if alloc.FreeAddressCount() != 0 {
+		t.Errorf("Expected 0 free addresses, got %d", alloc.FreeAddressCount())
+	}
+
 	_, err = alloc.Allocate("abc7", "pod-abc7", "ns")
-	if err == nil {
-		t.Fatal("Expected error allocating 7th address")
+	if err != ErrNoFreeIPs {
+		t.Fatal("Expected ErrNoFreeIPs error allocating 7th address")
 	}
 
 	// Free 3 in the middle
@@ -77,12 +85,20 @@ func TestAllocator(t *testing.T) {
 		}
 	}
 
+	if alloc.FreeAddressCount() != 3 {
+		t.Errorf("Expected 3 free addresses, got %d", alloc.FreeAddressCount())
+	}
+
 	// Allocate 3 more
 	for i := 10; i < 13; i++ {
 		_, err := alloc.Allocate(fmt.Sprintf("abc%d", i), fmt.Sprintf("pod-abc%d", i), "ns")
 		if err != nil {
 			t.Fatalf("Error getting address %d [%+v]", i, err)
 		}
+	}
+
+	if alloc.FreeAddressCount() != 0 {
+		t.Errorf("Expected 0 free addresses, got %d", alloc.FreeAddressCount())
 	}
 
 	// extra alloc should fail

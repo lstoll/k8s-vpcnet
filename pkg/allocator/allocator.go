@@ -15,7 +15,11 @@ import (
 
 // ErrEmptyPool is returned if the IP pool is configured with 0 IPs, e.g no
 // additional IPs attached to the interface
-var ErrEmptyPool = errors.New("No free private IPs found on interface")
+var ErrEmptyPool = errors.New("Pool is empty, 0 IPs/Interfaces configured")
+
+// ErrNoFreeIPs is returned if the allocation fails because there are no free
+// IPs on the system
+var ErrNoFreeIPs = errors.New("No free IPs found")
 
 // Allocator is used for managing resource allocations. It can snapshot and
 // restore its state to disk
@@ -89,6 +93,11 @@ func (a *Allocator) SetENIs(enis nodestate.ENIs) error {
 }
 
 func (a *Allocator) Allocate(containerID, podName, podNamspace string) (*Allocation, error) {
+	// called outside lock, to prevent conflict on it.
+	if a.FreeAddressCount() < 1 {
+		return nil, ErrNoFreeIPs
+	}
+
 	a.allocatorMu.Lock()
 	defer a.allocatorMu.Unlock()
 
@@ -187,6 +196,27 @@ func (a *Allocator) ReleaseByContainer(containerID string) error {
 	}
 
 	return nil
+}
+
+// FreeAddressCount returns the number of unallocated IPs
+func (a *Allocator) FreeAddressCount() int {
+	a.allocatorMu.Lock()
+	defer a.allocatorMu.Unlock()
+
+	var ips []net.IP
+	for _, eni := range a.state.ENIs {
+		ips = append(ips, eni.IPs...)
+	}
+
+	var free int
+
+	for _, ip := range ips {
+		if _, ok := a.state.Allocations[ip.String()]; !ok {
+			free++
+		}
+	}
+
+	return free
 }
 
 // Classic Golang
