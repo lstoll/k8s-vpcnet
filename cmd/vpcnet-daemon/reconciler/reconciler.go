@@ -104,12 +104,14 @@ func (r *Reconciler) EvictPod(namespace, name string) error {
 	return nil
 }
 
-func (r *Reconciler) ipCheck() error {
+// PoolFull will handle the state where there are no free IPs. This is safe to
+// call repeatedly, it uses the cache to check current state. Obeys
+// configuration around if we should taint or not.
+func (r *Reconciler) PoolFull() error {
 	if !r.Config.TaintWhenNoIPs {
 		return nil // checking will have no effect, so just bail early
 	}
 
-	// fetch the current node object
 	obj, exists, err := r.NodeIndexer.GetByKey(r.NodeName)
 	if err != nil {
 		return errors.Wrapf(err, "Fetching object with key %s from store failed", r.NodeName)
@@ -123,24 +125,59 @@ func (r *Reconciler) ipCheck() error {
 		return fmt.Errorf("object with key %s [%v] is not a node", r.NodeName, obj)
 	}
 
-	// handle ip check
-	if r.Allocator.FreeAddressCount() < 1 {
-		// uh oh, we're full. Taint the node if not already
-		if !objutil.HasTaint(node, taintNoIPs, v1.TaintEffectNoSchedule) {
-			if err := objutil.UpdateNode(r.Clientset.CoreV1().Nodes(), r.NodeName,
-				objutil.AddTaint(taintNoIPs, v1.TaintEffectNoSchedule)); err != nil {
-				return errors.Wrap(err, "Error tainting node")
-			}
-		}
-	} else {
-		// we have capacity! Ensure we don't have the taint
-		if objutil.HasTaint(node, taintNoIPs, v1.TaintEffectNoSchedule) {
-			if err := objutil.UpdateNode(r.Clientset.CoreV1().Nodes(), r.NodeName,
-				objutil.RemoveTaint(taintNoIPs, v1.TaintEffectNoSchedule)); err != nil {
-				return errors.Wrap(err, "Error untainting node")
-			}
+	// uh oh, we're full. Taint the node if not already
+	if !objutil.HasTaint(node, taintNoIPs, v1.TaintEffectNoSchedule) {
+		if err := objutil.UpdateNode(r.Clientset.CoreV1().Nodes(), r.NodeName,
+			objutil.AddTaint(taintNoIPs, v1.TaintEffectNoSchedule)); err != nil {
+			return errors.Wrap(err, "Error tainting node")
 		}
 	}
 
 	return nil
+}
+
+// PoolNotFull will handle the state where there are free IPs. This is safe to
+// call repeatedly, it uses the cache to check current state. Obeys
+// configuration around if we should taint or not.
+func (r *Reconciler) PoolNotFull() error {
+	if !r.Config.TaintWhenNoIPs {
+		return nil // checking will have no effect, so just bail early
+	}
+
+	obj, exists, err := r.NodeIndexer.GetByKey(r.NodeName)
+	if err != nil {
+		return errors.Wrapf(err, "Fetching object with key %s from store failed", r.NodeName)
+	}
+	if !exists {
+		return fmt.Errorf("could not find node %s in index", r.NodeName)
+	}
+
+	node, ok := obj.(*v1.Node)
+	if !ok {
+		return fmt.Errorf("object with key %s [%v] is not a node", r.NodeName, obj)
+	}
+
+	// we have capacity! Ensure we don't have the taint
+	if objutil.HasTaint(node, taintNoIPs, v1.TaintEffectNoSchedule) {
+		if err := objutil.UpdateNode(r.Clientset.CoreV1().Nodes(), r.NodeName,
+			objutil.RemoveTaint(taintNoIPs, v1.TaintEffectNoSchedule)); err != nil {
+			return errors.Wrap(err, "Error untainting node")
+		}
+	}
+
+	return nil
+}
+
+func (r *Reconciler) ipCheck() error {
+	if !r.Config.TaintWhenNoIPs {
+		return nil // checking will have no effect, so just bail early
+	}
+
+	// fetch the current node object
+
+	// handle ip check
+	if r.Allocator.FreeAddressCount() < 1 {
+		return r.PoolFull()
+	}
+	return r.PoolNotFull()
 }
