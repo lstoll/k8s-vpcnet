@@ -154,10 +154,13 @@ spec:
           image: lstoll/vpcnet-daemon:{{.VersionTag}}
           imagePullPolicy: IfNotPresent
           args:
+            - -node-name=$(CURRENT_NODE_NAME)
             - --v=4
-          envFrom:
-            - configMapRef:
-                name: vpcnet-configuration
+          env:
+            - name: CURRENT_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
           securityContext:
             # This is so we can manage interfaces
             privileged: true

@@ -7,20 +7,20 @@ import (
 	"os"
 	"path"
 
-	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/cniinstall"
-	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/ifcontroller"
-	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/ipamsvc"
-	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetpb"
-	"github.com/oklog/run"
-	"google.golang.org/grpc"
-
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/golang/glog"
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/cniinstall"
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/ifcontroller"
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/ipamsvc"
+	"github.com/lstoll/k8s-vpcnet/cmd/vpcnet-daemon/reconciler"
 	"github.com/lstoll/k8s-vpcnet/pkg/allocator"
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"github.com/lstoll/k8s-vpcnet/pkg/ifmgr"
+	"github.com/lstoll/k8s-vpcnet/pkg/vpcnetpb"
+	"github.com/oklog/run"
 	"github.com/pkg/errors"
+	"google.golang.org/grpc"
 	"k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -37,13 +37,19 @@ import (
 var (
 	ipamSocketPath string
 	configPath     string
+	nodeName       string
 )
 
 func main() {
 	flag.Set("logtostderr", "true")
 	flag.StringVar(&ipamSocketPath, "ipam-socket-path", "/var/lib/cni/vpcnet/ipam.sock", "Path for IPAM gRPC Service Socket")
 	flag.StringVar(&configPath, "config-path", config.DefaultConfigPath, "Path to load the configuration file from")
+	flag.StringVar(&nodeName, "node-name", "", "(Kubernetes) name for this node (spec.nodeName)")
 	flag.Parse()
+
+	if nodeName == "" {
+		glog.Fatal("node-name is a required argument")
+	}
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -94,7 +100,8 @@ func main() {
 		glog.Fatalf("Error getting client [%v]", err)
 	}
 
-	listFunc := func(options meta_v1.ListOptions) (runtime.Object, error) {
+	// API access for this node
+	nodeListFunc := func(options meta_v1.ListOptions) (runtime.Object, error) {
 		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
 
 		return clientset.Core().RESTClient().Get().
@@ -105,7 +112,7 @@ func main() {
 			Get()
 	}
 
-	watchFunc := func(options meta_v1.ListOptions) (watch.Interface, error) {
+	nodeWatchFunc := func(options meta_v1.ListOptions) (watch.Interface, error) {
 		options.Watch = true
 		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
 		return clientset.Core().RESTClient().Get().
@@ -114,21 +121,21 @@ func main() {
 			VersionedParams(&options, meta_v1.ParameterCodec).
 			Watch()
 	}
-	lw := &cache.ListWatch{ListFunc: listFunc, WatchFunc: watchFunc}
+	nodeListWatch := &cache.ListWatch{ListFunc: nodeListFunc, WatchFunc: nodeWatchFunc}
 
-	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	nodeQueue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
 
-	indexer, informer := cache.NewIndexerInformer(lw, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
+	nodeIndexer, nodeInformer := cache.NewIndexerInformer(nodeListWatch, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
-				queue.Add(key)
+				nodeQueue.Add(key)
 			}
 		},
 		UpdateFunc: func(old interface{}, new interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(new)
 			if err == nil {
-				queue.Add(key)
+				nodeQueue.Add(key)
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
@@ -136,10 +143,19 @@ func main() {
 			// key function.
 			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 			if err == nil {
-				queue.Add(key)
+				nodeQueue.Add(key)
 			}
 		},
 	}, cache.Indexers{})
+
+	glog.Infof("Initializing reconciler")
+	rec := &reconciler.Reconciler{
+		Config:      cfg,
+		Clientset:   clientset,
+		NodeIndexer: nodeIndexer,
+		Allocator:   alloc,
+		NodeName:    nodeName,
+	}
 
 	glog.Info("Initializing IPTables manager")
 	ipt := uiptables.New(uexec.New(), udbus.New(), uiptables.ProtocolIpv4)
@@ -147,37 +163,37 @@ func main() {
 	glog.Info("Starting run group")
 	var g run.Group
 
-	ipmsvc := &ipamsvc.Service{
-		Allocator: alloc,
-	}
-
-	iprun, ipint := ipamService(ipmsvc)
+	iprun, ipint := ipamService(cfg, alloc, rec)
 	g.Add(iprun, ipint)
 
-	c := &ifcontroller.Controller{
-		Indexer:      indexer,
-		Queue:        queue,
-		Informer:     informer,
-		InstanceID:   iid,
-		VPCNetConfig: cfg,
-		HostIP:       hostIP,
-		ClientSet:    clientset,
-		IFMgr:        ifmgr.New(cfg.Network, ipt),
-		Allocator:    alloc,
-		CNIInstaller: &cniinstall.Installer{
-			IPAMSocketPath: ipamSocketPath,
-			Config:         cfg,
-		},
-	}
-
-	ifrun, ifint := ifc(c, 1)
+	ifrun, ifint := ifc(clientset, nodeIndexer, nodeInformer, nodeQueue, ipt, cfg, alloc, iid, hostIP, 1)
 	g.Add(ifrun, ifint)
+
+	recrun, recint := recGrp(rec)
+	g.Add(recrun, recint)
 
 	glog.Errorf("Run group terminated by [%+v]", g.Run())
 }
 
-func ipamService(svc vpcnetpb.IPAMServer) (func() error, func(error)) {
-	glog.Info("Starting IPAM Server")
+func recGrp(rec *reconciler.Reconciler) (func() error, func(error)) {
+	run := func() error {
+		glog.Info("Running IP pool/pod reconciler")
+		return rec.Run()
+	}
+
+	interrupt := func(error) {
+		rec.Stop()
+	}
+
+	return run, interrupt
+}
+
+func ipamService(cfg *config.Config, alloc *allocator.Allocator, reconciler *reconciler.Reconciler) (func() error, func(error)) {
+	ipmsvc := &ipamsvc.Service{
+		Config:    cfg,
+		Allocator: alloc,
+		Evictor:   reconciler,
+	}
 
 	_, err := os.Stat(ipamSocketPath)
 	if err == nil {
@@ -197,9 +213,10 @@ func ipamService(svc vpcnetpb.IPAMServer) (func() error, func(error)) {
 		glog.Fatalf("Error setting IPAM socket permissions [%+v]", err)
 	}
 	srv := grpc.NewServer()
-	vpcnetpb.RegisterIPAMServer(srv, svc)
+	vpcnetpb.RegisterIPAMServer(srv, ipmsvc)
 
 	run := func() error {
+		glog.Info("Serving IPAM Server")
 		return srv.Serve(lis)
 	}
 
@@ -211,10 +228,37 @@ func ipamService(svc vpcnetpb.IPAMServer) (func() error, func(error)) {
 	return run, interrupt
 }
 
-func ifc(c *ifcontroller.Controller, threadiness int) (func() error, func(error)) {
+func ifc(clientset kubernetes.Interface,
+	indexer cache.Indexer,
+	informer cache.Controller,
+	queue workqueue.RateLimitingInterface,
+	ipt uiptables.Interface,
+	cfg *config.Config,
+	alloc *allocator.Allocator,
+	iid string,
+	hostIP net.IP,
+	threadiness int) (func() error, func(error)) {
+
+	c := &ifcontroller.Controller{
+		Indexer:      indexer,
+		Queue:        queue,
+		Informer:     informer,
+		InstanceID:   iid,
+		VPCNetConfig: cfg,
+		HostIP:       hostIP,
+		ClientSet:    clientset,
+		IFMgr:        ifmgr.New(cfg.Network, ipt),
+		Allocator:    alloc,
+		CNIInstaller: &cniinstall.Installer{
+			IPAMSocketPath: ipamSocketPath,
+			Config:         cfg,
+		},
+	}
+
 	stop := make(chan struct{})
 
 	run := func() error {
+		glog.Info("Running node interface controller")
 		c.Run(threadiness, stop)
 		return nil
 	}
