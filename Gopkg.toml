@@ -76,6 +76,10 @@ required = [
   name = "google.golang.org/grpc"
   version = "~1.8.0"
 
+[[constraint]]
+  name = "github.com/oklog/run"
+  version = "~1.0.0"
+
 ## Things for client-go
 
 [[override]]
