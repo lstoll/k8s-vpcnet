@@ -5,6 +5,16 @@ metadata:
   namespace: kube-system
 data:
   config.toml: |
+    # indicates if we should add a k8s-vpcnet/no-free-ips:NoSchedule
+    # taint to the node when the IP address allocation pool is empty
+    taint_when_no_ips = true
+    # will make the allocator delete the pod from the
+    # kubernetes API when a pod IP allocation request fails (running pods
+    # remain untouched. This can help recover from this situation, but assumes
+    # that the user is OK when this happens (and has a mechanism in place for
+    # the pod to be re-created)
+    delete_pod_when_no_ips = true
+
     [network]
     # The range that pods will run in.
     cluster_cidr = "10.0.0.0/18"
@@ -32,7 +42,9 @@ data:
     # The verbosity level for CNI plugin. Higher to begin with, to make sure we
     # have diagnostic info
     cni_v_level = 2
+
 ---
+
 apiVersion: extensions/v1beta1
 # Schedule as a daemonset - this will ignore the race where networking isn't
 # ready which will block this coming up and configuring networking
@@ -85,8 +97,9 @@ spec:
           effect: NoSchedule
         - key: "k8s-vpcnet/no-free-ips"
           effect: NoSchedule
-      hostNetwork: true
+
 ---
+
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -95,7 +108,9 @@ metadata:
     app: eni-controller
   name: eni-controller
   namespace: kube-system
+
 ---
+
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:
@@ -114,7 +129,9 @@ rules:
   - list
   - get
   - update
+
 ---
+
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
@@ -131,7 +148,9 @@ subjects:
   - kind: ServiceAccount
     name:  eni-controller
     namespace: kube-system
+
 ---
+
 apiVersion: extensions/v1beta1
 kind: DaemonSet
 metadata:
@@ -203,6 +222,7 @@ spec:
           effect: NoSchedule
 
 ---
+
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -211,7 +231,9 @@ metadata:
     app: vpcnet-daemon
   name: vpcnet-daemon
   namespace: kube-system
+
 ---
+
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRole
 metadata:
@@ -221,16 +243,32 @@ metadata:
   #  k8s-addon: cluster-autoscaler.addons.k8s.io
     app: vpcnet-daemon
 rules:
-- apiGroups:
-  - ""
-  resources:
-  - nodes
-  verbs:
-  - watch
-  - list
-  - get
-  - update
+  # Daemon needs to be able to watch and manipulate nodes to read
+  # interface configuration, and interact with taints
+  - apiGroups:
+    - ""
+    resources:
+    - nodes
+    verbs:
+    - watch
+    - list
+    - get
+    - update
+  # Daemon needs to be able to interact with pods to delete oversubscribed
+  # (and enforce policy in the future).
+  - apiGroups:
+    - ""
+    resources:
+    - pods
+    verbs:
+    - watch
+    - list
+    - get
+    - update
+    - delete
+
 ---
+
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding
 metadata:
