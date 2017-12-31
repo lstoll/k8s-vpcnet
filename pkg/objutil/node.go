@@ -1,6 +1,10 @@
 package objutil
 
 import (
+	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/cenk/backoff"
@@ -79,3 +83,42 @@ func RemoveTaint(key string, effect v1.TaintEffect) func(node *v1.Node) {
 		n.Spec.Taints = keep
 	}
 }
+
+// ProviderIDToAWSInstanceID takes a node Provider ID, and returns the AWS
+// instance ID. From
+// https://github.com/kubernetes/kubernetes/blob/1a11a18/pkg/cloudprovider/providers/aws/instances.go#L36:18
+func ProviderIDToAWSInstanceID(providerID string) (string, error) {
+	if !strings.HasPrefix(providerID, "aws://") {
+		// Assume a bare aws volume id (vol-1234...)
+		// Build a URL with an empty host (AZ)
+		providerID = "aws://" + "/" + "/" + providerID
+	}
+	url, err := url.Parse(providerID)
+	if err != nil {
+		return "", fmt.Errorf("Invalid instance name (%s): %v", providerID, err)
+	}
+	if url.Scheme != "aws" {
+		return "", fmt.Errorf("Invalid scheme for AWS instance (%s)", providerID)
+	}
+
+	awsID := ""
+	tokens := strings.Split(strings.Trim(url.Path, "/"), "/")
+	if len(tokens) == 1 {
+		// instanceId
+		awsID = tokens[0]
+	} else if len(tokens) == 2 {
+		// az/instanceId
+		awsID = tokens[1]
+	}
+
+	// We sanity check the resulting volume; the two known formats are
+	// i-12345678 and i-12345678abcdef01
+	if awsID == "" || !awsInstanceRegMatch.MatchString(awsID) {
+		return "", fmt.Errorf("Invalid format for AWS instance (%s)", providerID)
+	}
+
+	return awsID, nil
+}
+
+// awsInstanceRegMatch represents Regex Match for AWS instance.
+var awsInstanceRegMatch = regexp.MustCompile("^i-[^/]*$")

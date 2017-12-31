@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"path"
+	"syscall"
+	"time"
+
+	"github.com/lstoll/k8s-vpcnet"
 
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -21,14 +26,12 @@ import (
 	"github.com/oklog/run"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
-	"k8s.io/api/core/v1"
-	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	runtimeutil "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/util/workqueue"
 	udbus "k8s.io/kubernetes/pkg/util/dbus"
 	uiptables "k8s.io/kubernetes/pkg/util/iptables"
 	uexec "k8s.io/utils/exec"
@@ -48,7 +51,7 @@ func main() {
 	flag.Parse()
 
 	if nodeName == "" {
-		glog.Fatal("node-name is a required argument")
+		glog.Fatalf("node-name is a required argument")
 	}
 
 	cfg, err := config.Load(configPath)
@@ -64,27 +67,31 @@ func main() {
 	md := ec2metadata.New(sess)
 	iid, err := md.GetMetadata("instance-id")
 	if err != nil {
-		glog.Fatalf("Error determining current instance ID [%v]", err)
+		runtimeutil.HandleError(err)
+		glog.Fatalf("Error determining current instance ID [%+v]", err)
 	}
 	hostIPStr, err := md.GetMetadata("local-ipv4")
 	if err != nil {
+		runtimeutil.HandleError(err)
 		glog.Fatalf("Error determining host IP address [%+v]", err)
 	}
 	hostIP := net.ParseIP(hostIPStr)
 
 	if cfg.Network.HostPrimaryInterface == "" {
-		glog.V(2).Info("Finding host primary interface")
+		glog.Info("Finding host primary interface")
 		cfg.Network.HostPrimaryInterface, err = primaryInterface(md)
 		if err != nil {
+			runtimeutil.HandleError(err)
 			glog.Fatalf("Error finding host's primary interface [%+v]", err)
 		}
-		glog.V(2).Infof("Primary interface is %q", cfg.Network.HostPrimaryInterface)
+		glog.Infof("Primary interface is %q", cfg.Network.HostPrimaryInterface)
 	}
 
 	glog.Info("Initializing Allocator")
 
 	alloc, err := allocator.New("")
 	if err != nil {
+		runtimeutil.HandleError(err)
 		glog.Fatalf("Error setting up allocator [%+v]", err)
 	}
 
@@ -92,124 +99,118 @@ func main() {
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		glog.Fatalf("Error getting client config [%v]", err)
+		runtimeutil.HandleError(err)
+		glog.Fatal("Error getting client config [%+v]", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		glog.Fatalf("Error getting client [%v]", err)
-	}
-
-	// API access for this node
-	nodeListFunc := func(options meta_v1.ListOptions) (runtime.Object, error) {
-		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
-
-		return clientset.Core().RESTClient().Get().
-			Namespace(v1.NamespaceAll).
-			Resource("nodes").
-			VersionedParams(&options, meta_v1.ParameterCodec).
-			Do().
-			Get()
-	}
-
-	nodeWatchFunc := func(options meta_v1.ListOptions) (watch.Interface, error) {
-		options.Watch = true
-		options.LabelSelector = fmt.Sprintf("aws-instance-id=%s", iid)
-		return clientset.Core().RESTClient().Get().
-			Namespace(v1.NamespaceAll).
-			Resource("nodes").
-			VersionedParams(&options, meta_v1.ParameterCodec).
-			Watch()
-	}
-	nodeListWatch := &cache.ListWatch{ListFunc: nodeListFunc, WatchFunc: nodeWatchFunc}
-
-	nodeQueue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-
-	nodeIndexer, nodeInformer := cache.NewIndexerInformer(nodeListWatch, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err == nil {
-				nodeQueue.Add(key)
-			}
-		},
-		UpdateFunc: func(old interface{}, new interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(new)
-			if err == nil {
-				nodeQueue.Add(key)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
-			// key function.
-			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			if err == nil {
-				nodeQueue.Add(key)
-			}
-		},
-	}, cache.Indexers{})
-
-	glog.Infof("Initializing reconciler")
-	rec := &reconciler.Reconciler{
-		Config:      cfg,
-		Clientset:   clientset,
-		NodeIndexer: nodeIndexer,
-		Allocator:   alloc,
-		NodeName:    nodeName,
+		runtimeutil.HandleError(err)
+		glog.Fatal("Error getting client [%+v]", err)
 	}
 
 	glog.Info("Initializing IPTables manager")
 	ipt := uiptables.New(uexec.New(), udbus.New(), uiptables.ProtocolIpv4)
 
-	glog.Info("Starting run group")
+	glog.Info("Creating run group")
 	var g run.Group
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	g.Add(
+		func() error {
+			glog.Info("Starting signal handler")
+			sig := <-sigCh
+			glog.Warningf("Received Signal %+v", sig)
+			return nil
+		},
+		func(err error) {
+			glog.Infof("Signal handler shutting down by %+v", err)
+			close(sigCh)
+		},
+	)
+
+	// This filters us down to just this node, which is all we care about here
+	nodeLabels := labels.Set{k8svpcnet.LabelAWSInstanceID: iid}
+	nodeFilterOpts := func(o *metav1.ListOptions) {
+		o.LabelSelector = nodeLabels.AsSelector().String()
+	}
+
+	nodeInformerFactory := informers.NewFilteredSharedInformerFactory(clientset, time.Second*30, metav1.NamespaceAll, nodeFilterOpts)
+	nodeInformerStopCh := make(chan struct{})
+	nodeInformerGroupStopCh := make(chan struct{})
+
+	glog.Info("Initializing reconciler")
+	rec := reconciler.New(
+		clientset,
+		nodeInformerFactory,
+		cfg,
+		alloc,
+		nodeName,
+	)
 
 	iprun, ipint := ipamService(cfg, alloc, rec)
 	g.Add(iprun, ipint)
 
-	ifrun, ifint := ifc(clientset, nodeIndexer, nodeInformer, nodeQueue, ipt, cfg, alloc, iid, hostIP, 1)
-	g.Add(ifrun, ifint)
+	ic := ifcontroller.New(
+		nodeInformerFactory,
+		iid,
+		hostIP,
+		ifmgr.New(cfg.Network, ipt),
+		alloc,
+		&cniinstall.Installer{
+			IPAMSocketPath: ipamSocketPath,
+			Config:         cfg,
+		},
+	)
 
-	recrun, recint := recGrp(rec)
-	g.Add(recrun, recint)
+	g.Add(ic.Run, ic.Stop)
 
-	glog.Errorf("Run group terminated by [%+v]", g.Run())
-}
+	g.Add(rec.Run, rec.Stop)
 
-func recGrp(rec *reconciler.Reconciler) (func() error, func(error)) {
-	run := func() error {
-		glog.Info("Running IP pool/pod reconciler")
-		return rec.Run()
-	}
+	g.Add(
+		func() error {
+			glog.Info("Starting Informer Factory")
+			// This needs to be started after we've set up the Listers
+			nodeInformerFactory.Start(nodeInformerStopCh)
+			<-nodeInformerGroupStopCh
+			return nil
+		},
+		func(err error) {
+			glog.Infof("Informer Factory shut down by %+v", err)
+			nodeInformerStopCh <- struct{}{}
+			nodeInformerGroupStopCh <- struct{}{}
+		},
+	)
 
-	interrupt := func(error) {
-		rec.Stop()
-	}
-
-	return run, interrupt
+	glog.Errorf("Run group terminated with [%+v]", g.Run())
 }
 
 func ipamService(cfg *config.Config, alloc *allocator.Allocator, reconciler *reconciler.Reconciler) (func() error, func(error)) {
-	ipmsvc := &ipamsvc.Service{
-		Config:    cfg,
-		Allocator: alloc,
-		Evictor:   reconciler,
-	}
+	ipmsvc := ipamsvc.New(
+		cfg,
+		alloc,
+		reconciler,
+	)
 
 	_, err := os.Stat(ipamSocketPath)
 	if err == nil {
 		err = os.Remove(ipamSocketPath)
 		if err != nil {
-			glog.Warningf("Error removing ipam socket [%+v]", err)
+			glog.Warning("Error removing ipam socket")
 		}
 	}
 	if err := os.MkdirAll(path.Dir(ipamSocketPath), 0700); err != nil {
+		runtimeutil.HandleError(err)
 		glog.Fatalf("Error creating IPAM socket dir [%+v]", err)
 	}
 	lis, err := net.Listen("unix", ipamSocketPath)
 	if err != nil {
+		runtimeutil.HandleError(err)
 		glog.Fatalf("Error listening on IPAM socket [%+v]", err)
 	}
 	if err := os.Chmod(ipamSocketPath, 0600); err != nil {
+		runtimeutil.HandleError(err)
 		glog.Fatalf("Error setting IPAM socket permissions [%+v]", err)
 	}
 	srv := grpc.NewServer()
@@ -220,51 +221,10 @@ func ipamService(cfg *config.Config, alloc *allocator.Allocator, reconciler *rec
 		return srv.Serve(lis)
 	}
 
-	interrupt := func(error) {
+	interrupt := func(err error) {
+		glog.Infof("IPAM Server shut down by %+v", err)
 		srv.GracefulStop()
 		lis.Close()
-	}
-
-	return run, interrupt
-}
-
-func ifc(clientset kubernetes.Interface,
-	indexer cache.Indexer,
-	informer cache.Controller,
-	queue workqueue.RateLimitingInterface,
-	ipt uiptables.Interface,
-	cfg *config.Config,
-	alloc *allocator.Allocator,
-	iid string,
-	hostIP net.IP,
-	threadiness int) (func() error, func(error)) {
-
-	c := &ifcontroller.Controller{
-		Indexer:      indexer,
-		Queue:        queue,
-		Informer:     informer,
-		InstanceID:   iid,
-		VPCNetConfig: cfg,
-		HostIP:       hostIP,
-		ClientSet:    clientset,
-		IFMgr:        ifmgr.New(cfg.Network, ipt),
-		Allocator:    alloc,
-		CNIInstaller: &cniinstall.Installer{
-			IPAMSocketPath: ipamSocketPath,
-			Config:         cfg,
-		},
-	}
-
-	stop := make(chan struct{})
-
-	run := func() error {
-		glog.Info("Running node interface controller")
-		c.Run(threadiness, stop)
-		return nil
-	}
-
-	interrupt := func(error) {
-		close(stop)
 	}
 
 	return run, interrupt

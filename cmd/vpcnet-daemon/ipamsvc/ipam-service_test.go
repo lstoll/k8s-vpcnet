@@ -62,11 +62,11 @@ func TestEviction(t *testing.T) {
 	alloc := &fakeAllocator{}
 	evict := &fakeEvictor{}
 
-	svc := &Service{
-		Allocator: alloc,
-		Evictor:   evict,
-		Config:    &config.Config{DeletePodWhenNoIPs: true},
-	}
+	svc := New(
+		&config.Config{DeletePodWhenNoIPs: true},
+		alloc,
+		evict,
+	)
 
 	_, err := svc.Add(context.Background(), &vpcnetpb.AddRequest{
 		PodName:      "pod-name",

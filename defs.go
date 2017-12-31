@@ -1,5 +1,9 @@
 package k8svpcnet
 
+// LabelAWSInstanceID is the label applied to nodes for filtering them when
+// applying configuration
+const LabelAWSInstanceID = "k8s-vpcnet/instance-id"
+
 // InstanceENIsAvailable contains a mapping of instance types to the number of ENIs available
 var InstanceENIsAvailable = map[string]int{
 	"c1.medium":   2,

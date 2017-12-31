@@ -45,6 +45,15 @@ type Service struct {
 	Evictor   Evictor
 }
 
+// New returns a configured Service
+func New(cfg *config.Config, alloc Allocator, evict Evictor) *Service {
+	return &Service{
+		Allocator: alloc,
+		Config:    cfg,
+		Evictor:   evict,
+	}
+}
+
 // Add is called when a container is added
 func (i *Service) Add(ctx context.Context, req *vpcnetpb.AddRequest) (*vpcnetpb.AddResponse, error) {
 	a, err := i.Allocator.Allocate(req.ContainerID, req.PodName, req.PodNamespace)
@@ -53,14 +62,14 @@ func (i *Service) Add(ctx context.Context, req *vpcnetpb.AddRequest) (*vpcnetpb.
 			glog.Warningf("No free IPs while allocating Container %q Pod %s/%s, deleting pod", req.ContainerID, req.PodNamespace, req.PodName)
 			// we are full, so ensure we indicate as such
 			if err := i.Evictor.PoolFull(); err != nil {
-				glog.Errorf("Error notifying pool full state: [%+v}", err)
+				glog.Errorf("Error notifying pool full state [%+v]", err)
 			}
 			if err := i.Evictor.EvictPod(req.PodNamespace, req.PodName); err != nil {
 				runtime.HandleError(err)
-				glog.Errorf("Error evicting pod, ignoring: [%+v]", err)
+				glog.Errorf("Error evicting pod, ignoring [%+v]", err)
 			}
 		} else {
-			glog.Errorf("Error calling allocator Allocate for Container %q Pod %s/%s: [%+v}", req.ContainerID, req.PodNamespace, req.PodName, err)
+			glog.Errorf("Error calling allocator Allocate for Container %q Pod %s/%s [%+v]", req.ContainerID, req.PodNamespace, req.PodName, err)
 		}
 
 		return nil, grpc.Errorf(codes.Internal, "Error allocating address: %q", err.Error())
@@ -69,11 +78,11 @@ func (i *Service) Add(ctx context.Context, req *vpcnetpb.AddRequest) (*vpcnetpb.
 	// Check on pool address count, so we can taint before we have a failure
 	if i.Allocator.FreeAddressCount() < 1 {
 		if err := i.Evictor.PoolFull(); err != nil {
-			glog.Errorf("Error notifying pool full state: [%+v}", err)
+			glog.Errorf("Error notifying pool full state [%+v]", err)
 		}
 	} else {
 		if err := i.Evictor.PoolNotFull(); err != nil {
-			glog.Errorf("Error notifying pool not full state: [%+v}", err)
+			glog.Errorf("Error notifying pool not full state [%+v]", err)
 		}
 	}
 
@@ -88,7 +97,7 @@ func (i *Service) Add(ctx context.Context, req *vpcnetpb.AddRequest) (*vpcnetpb.
 func (i *Service) Del(ctx context.Context, req *vpcnetpb.DelRequest) (*vpcnetpb.DelResponse, error) {
 	err := i.Allocator.ReleaseByContainer(req.ContainerID)
 	if err != nil {
-		glog.Errorf("Error calling allocator Release for Container %q: [%+v}", req.ContainerID, err)
+		glog.Errorf("Error calling allocator Release for container %q: [%+v]", req.ContainerID, err)
 		return nil, grpc.Errorf(codes.Internal, "Error releasing address: %q", err.Error())
 	}
 

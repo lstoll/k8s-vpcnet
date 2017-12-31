@@ -9,7 +9,7 @@ import (
 	"github.com/lstoll/k8s-vpcnet/pkg/config"
 	"k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/kubernetes/staging/src/k8s.io/client-go/kubernetes/fake"
 )
@@ -75,23 +75,32 @@ func TestReconcilerTainting(t *testing.T) {
 					v1.Taint{Key: taintNoIPs, Effect: v1.TaintEffectNoSchedule})
 			}
 
-			apiObjs := []runtime.Object{}
-			apiObjs = append(apiObjs, testNode)
+			clientset := fake.NewSimpleClientset(testNode)
+			informerFactory := informers.NewSharedInformerFactory(clientset, 0)
 
-			r := &Reconciler{
-				Config:              &config.Config{TaintWhenNoIPs: true},
-				NodeIndexer:         newIndexer(testNode),
-				NodeName:            "test-node",
-				Clientset:           fake.NewSimpleClientset(apiObjs...),
-				Allocator:           alloc,
-				IPPoolCheckInterval: 1 * time.Nanosecond,
+			stopCh := make(chan struct{})
+			go informerFactory.Start(stopCh)
+			defer func() { stopCh <- struct{}{} }()
+
+			r := New(
+				clientset,
+				informerFactory,
+				&config.Config{TaintWhenNoIPs: true},
+				alloc,
+				"test-node",
+			)
+
+			if !cache.WaitForCacheSync(stopCh, r.nodesSynced) {
+				t.Fatal("Error waiting for caches to sync")
 			}
+
+			r.IPPoolCheckInterval = 1 * time.Nanosecond
 
 			if err := r.ipCheck(); err != nil {
 				t.Errorf("Error calling ipCheck [%+v]", err)
 			}
 
-			node, err := r.Clientset.Core().Nodes().Get("test-node", meta_v1.GetOptions{})
+			node, err := clientset.Core().Nodes().Get("test-node", meta_v1.GetOptions{})
 			if err != nil {
 				t.Fatalf("Error fetching test-node [%+v]", err)
 			}
@@ -102,13 +111,4 @@ func TestReconcilerTainting(t *testing.T) {
 			}
 		})
 	}
-}
-
-func newIndexer(node *v1.Node) cache.Indexer {
-	idx := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
-	err := idx.Add(node)
-	if err != nil {
-		panic(err)
-	}
-	return idx
 }
