@@ -11,7 +11,10 @@ import (
 	"k8s.io/api/core/v1"
 	api_errors "k8s.io/apimachinery/pkg/api/errors"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeutil "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -33,29 +36,64 @@ type Allocator interface {
 // kubernetes cluster state it takes care of managing failed pods, and avoiding
 // the scheduling of new pods
 type Reconciler struct {
-	// Config is the configuration for this VPCnet
-	Config *config.Config
-	// Clientset is the client for this cluster
-	Clientset kubernetes.Interface
-	// NodeIndexer is a cache.Indexer for this node. It is used for reading the
-	// current state of this Node, rather than making an outgoing API call
-	NodeIndexer cache.Indexer
-	// Allocator is used for checking the state of the IP pool
-	Allocator Allocator
-	// NodeName is the name of the current node. What we retrieve from the
-	// indexer
-	NodeName string
-
 	// IPPoolCheckInterval is how often we check the IP pool see how many
 	// addresses are free. if not set, Default will be used
 	IPPoolCheckInterval time.Duration
 
+	// Config is the configuration for this VPCnet
+	config *config.Config
+	// allocator is used for checking the state of the IP pool
+	allocator Allocator
+	// nodeName is the name of the current node. What we retrieve from the
+	// indexer
+	nodeName string
+
+	// Clientset is the client for this cluster
+	clientset kubernetes.Interface
+	// NodeLister is a Lister for nodes. It is used for reading the
+	// current state of this Node, rather than making an outgoing API call
+	nodeLister  corelisters.NodeLister
+	nodesSynced cache.InformerSynced
+
 	stopC chan struct{}
+}
+
+// New returns a Reconciler configured for use
+func New(
+	client kubernetes.Interface,
+	informerFactory informers.SharedInformerFactory,
+	cfg *config.Config,
+	allocator Allocator,
+	nodeName string,
+
+) *Reconciler {
+	nodeInformer := informerFactory.Core().V1().Nodes()
+
+	return &Reconciler{
+		config:      cfg,
+		clientset:   client,
+		nodeLister:  nodeInformer.Lister(),
+		nodesSynced: nodeInformer.Informer().HasSynced,
+		allocator:   allocator,
+		nodeName:    nodeName,
+	}
 }
 
 // Run is the main loop for the reconciler. This call blocks until it is complete
 func (r *Reconciler) Run() error {
 	r.stopC = make(chan struct{})
+
+	glog.Info("Starting pod/address reconciler")
+
+	glog.Info("Waiting for caches to sync")
+
+	// Wait for all involved caches to be synced,
+	if !cache.WaitForCacheSync(r.stopC, r.nodesSynced) {
+		err := fmt.Errorf("Timed out waiting for caches to sync")
+		glog.Error(err)
+		runtimeutil.HandleError(err)
+		return err
+	}
 
 	ipdur := r.IPPoolCheckInterval
 	if ipdur == 0 {
@@ -80,7 +118,8 @@ func (r *Reconciler) Run() error {
 }
 
 // Stop terminates the reconciler
-func (r *Reconciler) Stop() {
+func (r *Reconciler) Stop(err error) {
+	glog.Infof("Reconciler shut down by %+v", err)
 	if r.stopC != nil {
 		r.stopC <- struct{}{}
 	}
@@ -95,9 +134,9 @@ func (r *Reconciler) EvictPod(namespace, name string) error {
 		// ignore, non-fatal
 		glog.Errorf("Error running pre-eviction IP pool check [%+v]", err)
 	}
-	glog.Infof("Deleting pod %s.%s", namespace, name)
+	glog.Infof("Deleting pod %s/%s", namespace, name)
 	// TODO - is just killing the pods the best path forward?
-	err := r.Clientset.CoreV1().Pods(namespace).Delete(name, &meta_v1.DeleteOptions{})
+	err := r.clientset.CoreV1().Pods(namespace).Delete(name, &meta_v1.DeleteOptions{})
 	if err != nil && !api_errors.IsNotFound(err) {
 		return errors.Wrapf(err, "Error deleting pod %q from namespace %q", name, namespace)
 	}
@@ -108,26 +147,18 @@ func (r *Reconciler) EvictPod(namespace, name string) error {
 // call repeatedly, it uses the cache to check current state. Obeys
 // configuration around if we should taint or not.
 func (r *Reconciler) PoolFull() error {
-	if !r.Config.TaintWhenNoIPs {
+	if !r.config.TaintWhenNoIPs {
 		return nil // checking will have no effect, so just bail early
 	}
 
-	obj, exists, err := r.NodeIndexer.GetByKey(r.NodeName)
+	node, err := r.nodeLister.Get(r.nodeName)
 	if err != nil {
-		return errors.Wrapf(err, "Fetching object with key %s from store failed", r.NodeName)
-	}
-	if !exists {
-		return fmt.Errorf("could not find node %s in index", r.NodeName)
-	}
-
-	node, ok := obj.(*v1.Node)
-	if !ok {
-		return fmt.Errorf("object with key %s [%v] is not a node", r.NodeName, obj)
+		return errors.Wrapf(err, "Fetching object with key %q from store failed", r.nodeName)
 	}
 
 	// uh oh, we're full. Taint the node if not already
 	if !objutil.HasTaint(node, taintNoIPs, v1.TaintEffectNoSchedule) {
-		if err := objutil.UpdateNode(r.Clientset.CoreV1().Nodes(), r.NodeName,
+		if err := objutil.UpdateNode(r.clientset.CoreV1().Nodes(), r.nodeName,
 			objutil.AddTaint(taintNoIPs, v1.TaintEffectNoSchedule)); err != nil {
 			return errors.Wrap(err, "Error tainting node")
 		}
@@ -140,26 +171,18 @@ func (r *Reconciler) PoolFull() error {
 // call repeatedly, it uses the cache to check current state. Obeys
 // configuration around if we should taint or not.
 func (r *Reconciler) PoolNotFull() error {
-	if !r.Config.TaintWhenNoIPs {
+	if !r.config.TaintWhenNoIPs {
 		return nil // checking will have no effect, so just bail early
 	}
 
-	obj, exists, err := r.NodeIndexer.GetByKey(r.NodeName)
+	node, err := r.nodeLister.Get(r.nodeName)
 	if err != nil {
-		return errors.Wrapf(err, "Fetching object with key %s from store failed", r.NodeName)
-	}
-	if !exists {
-		return fmt.Errorf("could not find node %s in index", r.NodeName)
-	}
-
-	node, ok := obj.(*v1.Node)
-	if !ok {
-		return fmt.Errorf("object with key %s [%v] is not a node", r.NodeName, obj)
+		return errors.Wrapf(err, "Fetching object with key %q from store failed", r.nodeName)
 	}
 
 	// we have capacity! Ensure we don't have the taint
 	if objutil.HasTaint(node, taintNoIPs, v1.TaintEffectNoSchedule) {
-		if err := objutil.UpdateNode(r.Clientset.CoreV1().Nodes(), r.NodeName,
+		if err := objutil.UpdateNode(r.clientset.CoreV1().Nodes(), r.nodeName,
 			objutil.RemoveTaint(taintNoIPs, v1.TaintEffectNoSchedule)); err != nil {
 			return errors.Wrap(err, "Error untainting node")
 		}
@@ -169,14 +192,12 @@ func (r *Reconciler) PoolNotFull() error {
 }
 
 func (r *Reconciler) ipCheck() error {
-	if !r.Config.TaintWhenNoIPs {
+	if !r.config.TaintWhenNoIPs {
 		return nil // checking will have no effect, so just bail early
 	}
 
-	// fetch the current node object
-
 	// handle ip check
-	if r.Allocator.FreeAddressCount() < 1 {
+	if r.allocator.FreeAddressCount() < 1 {
 		return r.PoolFull()
 	}
 	return r.PoolNotFull()
