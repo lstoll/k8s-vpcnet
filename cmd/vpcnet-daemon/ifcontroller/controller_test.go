@@ -102,7 +102,9 @@ func TestIFController(t *testing.T) {
 	t.Log("Add a provider ID to the node but no ENIs, should basically no-op")
 
 	node.Spec.ProviderID = "aws:///i-1234"
-	fakeWatch.Add(node)
+	go func() {
+		fakeWatch.Add(node)
+	}()
 
 	if err := c.handleNode("test-node"); err != nil {
 		t.Fatalf("Unexpected error [%+v]", err)
