@@ -104,7 +104,7 @@ func TestEviction(t *testing.T) {
 		PodNamespace: "pod-namespace",
 	})
 	if err != nil {
-		t.Error("Unexpected error: [%+v]", err)
+		t.Errorf("Unexpected error: [%+v]", err)
 	}
 
 	if evict.fullCalled {
@@ -124,7 +124,7 @@ func TestEviction(t *testing.T) {
 		PodNamespace: "pod-namespace",
 	})
 	if err != nil {
-		t.Error("Unexpected error: [%+v]", err)
+		t.Errorf("Unexpected error: [%+v]", err)
 	}
 
 	if !evict.fullCalled {
