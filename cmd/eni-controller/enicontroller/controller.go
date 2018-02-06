@@ -54,6 +54,9 @@ type Controller struct {
 
 	// stopCh is used to signal that we should shut down
 	stopCh chan struct{}
+
+	maxInterfaces      int
+	maxIPsPerInterface int
 }
 
 // New creates a new Interface Controller that is configured correctly
@@ -61,16 +64,20 @@ func New(
 	client kubernetes.Interface,
 	informerFactory informers.SharedInformerFactory,
 	ec2 EC2Client,
+	maxInterfaces int,
+	maxIPsPerInterface int,
 ) *Controller {
 
 	nodeInformer := informerFactory.Core().V1().Nodes()
 
 	controller := &Controller{
-		nodeLister:  nodeInformer.Lister(),
-		nodesSynced: nodeInformer.Informer().HasSynced,
-		workqueue:   workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ENINodes"),
-		ec2Client:   ec2,
-		client:      client,
+		nodeLister:         nodeInformer.Lister(),
+		nodesSynced:        nodeInformer.Informer().HasSynced,
+		workqueue:          workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "ENINodes"),
+		ec2Client:          ec2,
+		client:             client,
+		maxInterfaces:      maxInterfaces,
+		maxIPsPerInterface: maxIPsPerInterface,
 	}
 
 	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -225,6 +232,9 @@ func (c *Controller) handleNode(key string) error {
 			node.Name, instanceInfo.InstanceType,
 		)
 	}
+	if c.maxInterfaces > 0 && numENIs > c.maxInterfaces {
+		numENIs = c.maxInterfaces
+	}
 	// drop one, to account for the default first interface
 	numENIs = numENIs - 1
 
@@ -234,6 +244,9 @@ func (c *Controller) handleNode(key string) error {
 			"we have no IP mapping info for node %s's instance type %s, cannot configure interfaces",
 			node.Name, instanceInfo.InstanceType,
 		)
+	}
+	if c.maxIPsPerInterface > 0 && numIPs > c.maxIPsPerInterface {
+		numIPs = c.maxIPsPerInterface
 	}
 
 	// Check to see if we have a ENI configuration

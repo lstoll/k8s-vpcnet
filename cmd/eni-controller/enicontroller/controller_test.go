@@ -40,6 +40,8 @@ func TestENIController(t *testing.T) {
 		clientset,
 		informerFactory,
 		ec2,
+		-1,
+		-1,
 	)
 
 	t.Log("Handle an empty node")

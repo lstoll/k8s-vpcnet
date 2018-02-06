@@ -19,8 +19,16 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+var (
+	maxInterfaces      int
+	maxIPsPerInterface int
+)
+
 func main() {
 	flag.Set("logtostderr", "true")
+
+	flag.IntVar(&maxInterfaces, "max-interfaces", -1, "Maximum number of ENI interfaces to provision per instance.")
+	flag.IntVar(&maxIPsPerInterface, "max-interface-ips", -1, "Maximum number of IPs to provision per ENI interface.")
 
 	flag.Parse()
 
@@ -88,6 +96,8 @@ func main() {
 		clientset,
 		informerFactory,
 		ec2,
+		maxInterfaces,
+		maxIPsPerInterface,
 	)
 
 	g.Add(controller.Run, controller.Stop)
