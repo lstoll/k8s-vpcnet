@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.org/lstoll/k8s-vpcnet.svg?branch=master)](https://travis-ci.org/lstoll/k8s-vpcnet)
 
-STATUS: beta. Still needs more testing, and likely to have breaking changes
+## STATUS: **Deprecated.** Use https://github.com/aws/amazon-vpc-cni-k8s/
 
 Kubernetes networking implementation for AWS that assigns Pods direct VPC routable IP addresses without using an overlay or hitting the 50/100 route limit.
 
